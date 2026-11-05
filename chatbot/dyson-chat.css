@@ -1,0 +1,43 @@
+/* Dyson AI Assistant – left-column chatbot (mockup) */
+.dy-layout{display:flex;align-items:flex-start;gap:24px;max-width:1700px;margin:0 auto;padding:0 24px 24px 24px;box-sizing:border-box}
+.dy-layout>.help-me-choose{flex:1 1 auto;min-width:0;position:relative;z-index:1}
+.dy-layout .zoovu-component{z-index:auto}
+.dy-chat{flex:0 0 360px;width:360px;position:sticky;top:131px;height:calc(100vh - 155px);min-height:460px;max-height:760px;display:flex;flex-direction:column;background:#fff;border:1px solid #d8d8d8;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.08);font-family:DysonFutura,Helvetica,Arial,sans-serif;color:#1a1a1a;z-index:5}
+.dy-chat *{box-sizing:border-box}
+.dy-chat__header{background:#000;color:#fff;padding:12px 16px;display:flex;align-items:center;gap:10px}
+.dy-chat__title{font-size:16px;font-weight:600;line-height:1.2}
+.dy-chat__sub{font-size:12px;opacity:.75;margin-top:2px;line-height:1.3}
+.dy-chat__hbtn{margin-left:auto;display:flex;gap:6px}
+.dy-chat__hbtn button{background:none;border:0;color:#fff;cursor:pointer;padding:4px;border-radius:4px;display:flex}
+.dy-chat__hbtn button:hover{background:rgba(255,255,255,.15)}
+.dy-chat__body{flex:1 1 auto;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:12px;scroll-behavior:smooth}
+.dy-msg{display:flex;gap:8px;max-width:100%}
+.dy-msg__col{display:flex;flex-direction:column;min-width:0;max-width:calc(100% - 36px)}
+.dy-msg__meta{font-size:11px;color:#666;margin-bottom:3px}
+.dy-msg__bubble{background:#e9e9e9;border-radius:10px;padding:10px 12px;font-size:14px;line-height:1.45;overflow-wrap:anywhere}
+.dy-msg__bubble p{margin:0 0 8px}.dy-msg__bubble p:last-child{margin-bottom:0}
+.dy-msg__bubble ul{margin:6px 0 8px;padding-left:18px}.dy-msg__bubble li{margin-bottom:4px}
+.dy-msg__bubble strong{font-weight:700}
+.dy-avatar{flex:0 0 28px;width:28px;height:28px;border-radius:50%;background:#fff;border:1px solid #1a1a1a;display:flex;align-items:center;justify-content:center;margin-top:16px}
+.dy-msg--user{align-self:flex-end;flex-direction:column;align-items:flex-end}
+.dy-msg--user .dy-msg__col{align-items:flex-end;max-width:85%}
+.dy-msg--user .dy-msg__bubble{background:#1a1a1a;color:#fff}
+.dy-chips{display:flex;flex-direction:column;align-items:flex-start;gap:8px;margin-left:36px}
+.dy-chip{background:#fff;border:1px solid #bbb;border-radius:6px;padding:8px 10px;font:inherit;font-size:13px;text-align:left;cursor:pointer;display:flex;gap:6px;align-items:flex-start;color:#1a1a1a}
+.dy-chip:hover{border-color:#000;background:#f6f6f6}
+.dy-typing{display:inline-flex;gap:4px;padding:4px 2px}
+.dy-typing i{width:6px;height:6px;border-radius:50%;background:#777;animation:dyb 1s infinite ease-in-out}
+.dy-typing i:nth-child(2){animation-delay:.15s}.dy-typing i:nth-child(3){animation-delay:.3s}
+@keyframes dyb{0%,80%,100%{opacity:.25;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+.dy-chat__foot{border-top:1px solid #e4e4e4;padding:10px 12px 8px}
+.dy-chat__form{display:flex;gap:8px}
+.dy-chat__input{flex:1;border:1.5px solid #1a1a1a;border-radius:4px;padding:9px 10px;font:inherit;font-size:14px;min-width:0}
+.dy-chat__send{width:40px;border:0;border-radius:4px;background:#000;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.dy-chat__send:hover{background:#333}
+.dy-chat__note{font-size:11px;color:#666;margin-top:6px}
+@media (max-width:1023px){
+  .dy-layout{flex-direction:column;align-items:stretch;padding:0 12px 16px}
+  .dy-chat{position:relative;top:0;flex:none;width:100%;height:520px;min-height:0}
+}
+/* 3D Preview button */
+.dy-3d-btn{cursor:pointer}

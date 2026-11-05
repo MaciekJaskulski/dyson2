@@ -1,0 +1,52 @@
+/* "Help me choose" CTA – same look as the green rich-content button on the Air treatment page */
+.proto-hmc {
+  display: inline-block; box-sizing: border-box;
+  min-width: 120px; padding: 16px 20px;
+  background: rgb(121, 185, 40); color: #000 !important;
+  border-radius: 4px; border: 0;
+  font: 500 16px/24px DysonFutura, sans-serif;
+  text-align: center; text-decoration: none !important; cursor: pointer;
+}
+.proto-hmc:hover { filter: brightness(.95); }
+.proto-hmc span { color: inherit; font: inherit; }
+
+/* inside filter / count bars */
+.proto-count { display: flex !important; align-items: center; gap: 0 5px; flex-wrap: wrap; }
+.proto-count > p, .proto-count > span { margin: 0; }
+.proto-count .proto-hmc { padding: 8px 20px; flex: none; margin-left: auto; }
+
+/* inline CTA under the "Shop all" tile */
+.proto-has-cta { display: flex; flex-direction: column; }
+.proto-hmc.proto-hmc--tile {
+  display: block; min-width: 0; width: auto; margin-top: 6px; padding: 0;
+  background: none; color: inherit !important; border-radius: 0;
+  font-size: 14px; line-height: 20px; font-weight: 400; text-align: left; white-space: nowrap;
+}
+.proto-hmc.proto-hmc--tile:hover { filter: none; text-decoration: underline !important; }
+
+.carousel-cards__link.proto-active { cursor: pointer; }
+
+/* site JS hides the product list ("invisible") until the Dyson API answers – requests are kept pending, so force it visible */
+.js-product-listing-results.invisible, .js-product-listing-results.invisible * { visibility: visible !important; }
+
+/* Search results: sort box = [Help me choose] | Sort by: ... */
+.proto-sortbox { display: flex !important; align-items: center; }
+.proto-sortbox > .search-dropdown { flex: 1 1 auto; min-width: 0; }
+.proto-sortbox > .proto-hmc { flex: none; min-width: 0; padding: 8px 14px; margin-right: 12px; font-size: 14px; white-space: nowrap; }
+
+/* Compare: "Summarize it with AI" – Dyson primary green CTA */
+.proto-ai {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 20px; background: rgb(121, 185, 40); color: #000; border: 0; border-radius: 4px;
+  font: 500 16px/24px DysonFutura, sans-serif; cursor: pointer;
+}
+.proto-ai:hover { filter: brightness(.95); }
+.dy-3d-btn{cursor:pointer}
+
+/* PLP nudge: small sticky card at the right edge, vertically centred */
+.proto-nudge { position: fixed; right: 16px; top: 50%; z-index: 999; width: 210px; box-sizing: border-box; padding: 14px 14px 12px; background: #fff; color: #000; border-radius: 8px; box-shadow: 0 4px 18px rgba(0,0,0,.22); font-family: DysonFutura, sans-serif; opacity: 0; transform: translate(12px, -50%); transition: opacity .3s, transform .3s; pointer-events: none; }
+.proto-nudge--in { opacity: 1; transform: translate(0, -50%); pointer-events: auto; }
+.proto-nudge p { margin: 0 14px 10px 0; font-size: 14px; line-height: 20px; }
+.proto-nudge__x { position: absolute; top: 4px; right: 6px; width: 24px; height: 24px; padding: 0; background: none; border: 0; font-size: 20px; line-height: 24px; color: #555; cursor: pointer; }
+.proto-nudge__x:hover { color: #000; }
+.proto-hmc.proto-hmc--small { display: block; min-width: 0; padding: 8px 12px; font-size: 14px; line-height: 20px; }

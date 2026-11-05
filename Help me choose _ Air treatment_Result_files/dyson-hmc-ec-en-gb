@@ -1,0 +1,132 @@
+
+    (function (window, document) {
+
+        function getRootElement() {
+            var defaultDiv = document.getElementById('smartassistant-advisor');
+            var newDefaultDiv = document.getElementById('zoovu-assistant');
+
+            
+            return newDefaultDiv ? newDefaultDiv : defaultDiv;
+        }
+
+        function createSpinner() {
+            
+            var css = "@keyframes zal-spinner-frames {" +
+                "0% {-webkit-transform: translate(-50%,-50%) rotate(0deg); transform: translate(-50%,-50%) rotate(0deg);}" +
+                "100% {-webkit-transform: translate(-50%,-50%) rotate(360deg); transform: translate(-50%,-50%) rotate(360deg);}" +
+                "}" +
+                "@-webkit-keyframes zal-spinner-frames {" +
+                "0% {-webkit-transform: translate(-50%,-50%) rotate(0deg); transform: translate(-50%,-50%) rotate(0deg);}" +
+                "100% {-webkit-transform: translate(-50%,-50%) rotate(360deg); transform: translate(-50%,-50%) rotate(360deg);}" +
+                "}" +
+                ".zal-spinner-div2 {position: relative;}" +
+                ".zal-spinner-div3, .zal-spinner-div3:after {position: absolute; width: 64px; height: 64px; border: 4px solid #646464; border: 4px solid rgba(0, 0, 0, .6); border-top-color: transparent; border-radius: 50%;}" +
+                ".zal-spinner-div3 {-webkit-animation: zal-spinner-frames 1s linear infinite; animation: zal-spinner-frames 1s linear infinite; top: 50px; left: 50px;}" +
+                ".zal-spinner-div3:after {-webkit-transform: rotate(90deg); transform: rotate(90deg);}" +
+                ".zal-spinner-div2 {-webkit-transform: translate(-100px, -100px) scale(1) translate(100px, 100px); transform: translate(-100px, -100px) scale(1) translate(100px, 100px);}" +
+                ".zal-spinner-div1 {width: 100px; height: 100px;}";
+
+            var styleElement = document.createElement("style");
+            styleElement.innerHTML = css;
+
+            var div1 = document.createElement("div");
+            div1.className += "zal-spinner-div1";
+            div1.style.padding = "150px 0";
+            div1.style.margin = "0 auto";
+
+            var div2 = document.createElement("div");
+            div2.className += "zal-spinner-div2";
+
+            var div3 = document.createElement("div");
+            div3.className += "zal-spinner-div3";
+
+            div1.appendChild(div2);
+            div2.appendChild(div3);
+
+            return {
+                styleElement: styleElement,
+                element: div1
+            }
+        }
+
+        function showLoaderOn(rootElement) {
+            if (!rootElement) {
+                return;
+            }
+
+            
+            var loaderDivId = "zoovu-assistant-loader";
+
+            var spinner = createSpinner();
+
+            document.head.appendChild(spinner.styleElement);
+
+            var loader = document.createElement("div");
+            loader.id = loaderDivId;
+            loader.style.width = "100%";
+            loader.appendChild(spinner.element);
+
+            
+            if (rootElement.innerHTML.trim().length > 0) {
+                return;
+            }
+            rootElement.appendChild(loader);
+        }
+
+        function assembleAssistant() {
+            var h = document.head;
+            var css = document.createElement('link');
+            css.setAttribute('rel', 'stylesheet');
+            css.setAttribute('type', 'text/css');
+            css.setAttribute('href', 'https://orca-cdn.zoovu.com/component-library/3600/ApplicationDysonMasterTheme/1.8.0/application-dyson-master-theme.remote-component.v1-8.min.css');
+            h.appendChild(css);
+            window.WebDesignManifest = window.WebDesignManifest ? window.WebDesignManifest : {};
+            window.WebDesignManifest['5pfNp8Gm8X3J'] = {};
+            var rbaUrl = '//orca-cdn.zoovu.com/core-js/runner-core-{MINOR_VERSION}-latest.min.js'.replace("{MINOR_VERSION}", '4.282');
+            var rba = document.createElement('script');
+            rba.src = rbaUrl;
+            rba.async = false;
+            h.appendChild(rba);
+            var app = document.createElement('script');
+            app.src = 'https://orca-cdn.zoovu.com/component-library/3600/ApplicationDysonMasterTheme/1.8.0/application-dyson-master-theme.remote-component.v1-8.min.js';
+            app.charset = "UTF-8";
+            app.async = false;
+            h.appendChild(app);
+            var l = document.createElement('script');
+            l.src = '//orca-cdn.zoovu.com/advisor-fe-web/api/v1/advisors/5pfNp8Gm8X3J/load-advisor?locale=en-GB&refererAdvisorCode=qLXhw3S2ZZrs&launcherId=250001941';
+            l.async = false;
+            h.appendChild(l);
+        }
+
+        function waitForRootElement(callback) {
+            var el = getRootElement();
+            if (el) {
+                callback(el);
+                return
+            }
+            new MutationObserver(function (mutationRecords, observer) {
+                var element = getRootElement();
+                if (element) {
+                    callback(element);
+                    observer.disconnect();
+                }
+            })
+                .observe(document.documentElement, {
+                    childList: true,
+                    subtree: true
+                });
+        }
+
+        waitForRootElement(function (element) {
+            
+            if (element.hasAttribute('data-zoovu-assistant-claimed')) {
+                console.warn('[Zoovu] Duplicate assistant loader execution skipped: element "#' + element.id +
+                    '" is already claimed by advisor "' + element.getAttribute('data-zoovu-assistant-claimed') +
+                    '". Make sure the loader script is embedded only once per page.');
+                return;
+            }
+            element.setAttribute('data-zoovu-assistant-claimed', '5pfNp8Gm8X3J');
+            showLoaderOn(element);
+            assembleAssistant();
+        });
+    })(window, document);

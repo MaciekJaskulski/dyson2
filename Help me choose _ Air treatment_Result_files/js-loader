@@ -1,0 +1,2583 @@
+(function(){
+    const zoovuId = 'A5WAziWy0TMNqWM/VXa8PqfBdTTYS4Nr';
+    const domainId = '97c2b38b-8728-4f88-a316-42afe8b17cb3';
+    const variables = [{"id":"ad6080ea-719b-4732-952f-ef4f1ce45e02","name":"Event target","type":"FUNCTION","valueType":"EVENT","function":function(event){return event.target
+/* */},"scope":"GLOBAL"},{"id":"cc8eb6c6-23e8-43ec-8a01-ee51002e1f0e","name":"[Hybris] Currency","type":"FUNCTION","valueType":"TEXT","function":function(event){var SITE_CCY = {
+  GB:'GBP', UK:'GBP', IE:'EUR', DE:'EUR', AT:'EUR', FR:'EUR', IT:'EUR', ES:'EUR', NL:'EUR',
+  BE:'EUR', LU:'EUR', PT:'EUR', FI:'EUR', GR:'EUR', CH:'CHF', SE:'SEK', NO:'NOK',
+  DK:'DKK', PL:'PLN', CZ:'CZK', HU:'HUF', RO:'RON', TR:'TRY',
+  US:'USD', CA:'CAD', MX:'MXN', BR:'BRL', AU:'AUD', NZ:'NZD', JP:'JPY', CN:'CNY',
+  HK:'HKD', TW:'TWD', SG:'SGD', MY:'MYR', TH:'THB', ID:'IDR', PH:'PHP',
+  IN:'INR', KR:'KRW', AE:'AED', SA:'SAR', ZA:'ZAR', IL:'ILS'
+};
+// Last-ditch, for a page serving a bare `lang="de"` with no region. Ambiguous by nature (de could be
+// AT or CH), but the ambiguous euro markets all land on EUR anyway, and any code beats '' — which is
+// an invalid enum that drops the event outright.
+var LANG_CCY = {
+  EN:'', DE:'EUR', FR:'EUR', IT:'EUR', ES:'EUR', NL:'EUR', PT:'EUR', FI:'EUR', EL:'EUR',
+  SV:'SEK', NB:'NOK', NO:'NOK', DA:'DKK', PL:'PLN', CS:'CZK', HU:'HUF', RO:'RON', TR:'TRY',
+  JA:'JPY', KO:'KRW', ZH:'CNY', TH:'THB', ID:'IDR', MS:'MYR', HE:'ILS'
+};
+var CCY_VALID = /^[A-Z]{3}$/;
+function ccyNorm(v) {
+  if (v == null) return '';
+  v = String(v).trim().toUpperCase();
+  return CCY_VALID.test(v) ? v : '';
+}
+function ccyFromCountry(v) {
+  if (v == null) return '';
+  return SITE_CCY[String(v).trim().toUpperCase()] || '';
+}
+// `en` is deliberately blank above: English alone says nothing about the market (GB/US/CA/AU/IE all
+// serve it), so guessing there would be worse than leaving the next tier to try.
+function ccyFromLang(v) {
+  if (v == null) return '';
+  return LANG_CCY[String(v).trim().toUpperCase()] || '';
+}
+// Country-code TLD. Deterministic, present before any script runs, and immune to every timing
+// problem the tiers above can hit — which is exactly why it is the floor rather than a shortcut:
+// a ccTLD is where the storefront is registered, not necessarily the market a page prices in.
+// A gTLD (.com/.net) carries no market, so it correctly yields '' and changes nothing.
+// SITE_CCY maps both GB and UK, so .co.uk resolves without a special case.
+function ccyFromHostname(h) {
+  if (!h) return '';
+  var parts = String(h).toLowerCase().split('.');
+  var tld = parts[parts.length - 1];
+  if (!/^[a-z]{2}$/.test(tld)) return '';
+  return ccyFromCountry(tld);
+}
+
+var d = window.dyson_gtag_dl || [];
+var i, e, c;
+
+// 1. gtag event currency — both page_view and view_item carry it
+for (i = d.length - 1; i >= 0; i--) {
+  e = d[i];
+  if (e && e[0] === 'event' && e[2] && e[2].currency) {
+    c = ccyNorm(e[2].currency);
+    if (c) return c;
+  }
+}
+
+// 2. JSON-LD offer — server-rendered on PDPs, so it cannot race the trigger.
+//    try inside the loop: third parties inject their own ld+json, and one malformed block
+//    must not stop us reaching the valid Product/Offer block later in the document.
+var ld = document.querySelectorAll('script[type="application/ld+json"]');
+for (i = 0; i < ld.length; i++) {
+  try {
+    var stack = [JSON.parse(ld[i].textContent)];
+    while (stack.length) {
+      var n = stack.pop();
+      if (!n || typeof n !== 'object') continue;
+      if (n.priceCurrency) { c = ccyNorm(n.priceCurrency); if (c) return c; }
+      if (Array.isArray(n)) { for (var a = 0; a < n.length; a++) stack.push(n[a]); }
+      else { if (n.offers) stack.push(n.offers); if (n['@graph']) stack.push(n['@graph']); }
+    }
+  } catch (e1) {}
+}
+
+// 3. gtag config.site — pushed before any event, so it survives an empty event list
+for (i = 0; i < d.length; i++) {
+  e = d[i];
+  if (e && e[0] === 'config' && e[2] && e[2].site) {
+    c = ccyFromCountry(e[2].site);
+    if (c) return c;
+  }
+}
+
+// 4. pageInfo.pageCountryCode
+try {
+  var pi = window.dataLayer && window.dataLayer.pageInfo;
+  if (pi && pi.pageCountryCode) { c = ccyFromCountry(pi.pageCountryCode); if (c) return c; }
+} catch (e2) {}
+
+// 5. documentElement.lang — region half first, then the bare language as a last resort
+try {
+  var lg = (document.documentElement.lang || '').replace('_', '-').split('-');
+  if (lg.length > 1) { c = ccyFromCountry(lg[lg.length - 1]); if (c) return c; }
+  if (lg[0]) { c = ccyFromLang(lg[0]); if (c) return c; }
+} catch (e3) {}
+
+// 6. hostname ccTLD — the floor. Tiers 1-5 all depend on something the page publishes, and the 80
+//    OTHER failures are pages where every one of them came back empty (`Value  is not compatible
+//    with currencyCode.`). Reached only when the five above yielded nothing, so it cannot change a
+//    currency that already resolves. On www.dyson.co.uk this always yields GBP; on a .com market it
+//    yields '' and the event still drops, exactly as today.
+try {
+  c = ccyFromHostname(window.location.hostname);
+  if (c) return c;
+} catch (e4) {}
+
+return '';
+/* */},"scope":"LOCAL"},{"id":"2c534d74-fba5-4461-9b40-afe70219bf4e","name":"[Hybris] Locale","type":"FUNCTION","valueType":"TEXT","function":function(event){// Read the locale from sources that browser translation leaves alone. Chrome, Edge and Safari
+// "Translate" rewrite <html lang> to the target language, which brought in about 70 junk locales.
+var pi = window.dataLayer && window.dataLayer.pageInfo;
+if (pi && pi.pageLanguage && pi.pageCountryCode) {
+  return String(pi.pageLanguage).toLowerCase() + '-' + String(pi.pageCountryCode).toUpperCase();
+}
+var og = document.querySelector('meta[property="og:locale"]');
+if (og && og.content) return og.content.replace('_', '-');
+return document.documentElement.lang || '';
+/* */},"scope":"LOCAL"},{"id":"1913db35-aefa-4690-aa66-b96a12e29e36","name":"[Hybris] Page Category","type":"FUNCTION","valueType":"TEXT","function":function(event){var pt = (window.dataLayer && window.dataLayer.pageInfo && window.dataLayer.pageInfo.pageType) || '';
+if (pt.indexOf('page-landing') !== -1) return 'home';
+if (pt.indexOf('page-basket') !== -1) return 'basket';
+if (pt.indexOf('page-search') !== -1) return 'search';
+var segs = window.location.pathname.split('/').filter(function(s){ return s; });
+return segs.length ? segs[0] : 'home';
+/* */},"scope":"LOCAL"},{"id":"f91db08a-1f19-457a-950d-de0827a27202","name":"[Hybris] Page Type","type":"FUNCTION","valueType":"TEXT","function":function(event){return (window.dataLayer && window.dataLayer.pageInfo && window.dataLayer.pageInfo.pageType) || '';
+/* */},"scope":"LOCAL"},{"id":"d9a137cc-860f-4e3c-8c22-a03bcbbf93d8","name":"[Hybris] Product Category","type":"FUNCTION","valueType":"TEXT","function":function(event){var d = window.dyson_gtag_dl || [];
+for (var i = d.length - 1; i >= 0; i--) {
+  var e = d[i];
+  if (e && e[0] === 'event' && e[2] && e[2].items && e[2].items[0] && e[2].items[0].item_category) return e[2].items[0].item_category;
+}
+return '';
+/* */},"scope":"LOCAL"},{"id":"32861da7-7fe1-4beb-bb0c-009a3e713bf4","name":"[Hybris] Product Price","type":"FUNCTION","valueType":"DECIMAL","function":function(event){// Locale-safe. Decides the decimal separator by position, and treats a separator followed by exactly
+// three digits as a thousands group — no currency Dyson sells in uses three decimal places. The old
+// parser got "1.299" wrong (returned 1.299 instead of 1299) because it only recognised the EU form
+// when a decimal comma was also present.
+function priceNum(v) {
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  if (v == null || v === '') return null;
+  var s = String(v).replace(/[^\d.,-]/g, '');
+  if (!s) return null;
+  var lastDot = s.lastIndexOf('.'), lastComma = s.lastIndexOf(',');
+  if (lastDot > -1 && lastComma > -1) {
+    s = lastComma > lastDot ? s.replace(/\./g, '').replace(',', '.') : s.replace(/,/g, '');
+  } else if (lastDot > -1 || lastComma > -1) {
+    var sep = lastDot > -1 ? '.' : ',';
+    var after = s.length - s.lastIndexOf(sep) - 1;
+    if (after === 3) s = s.split(sep).join('');
+    else s = s.replace(sep, '.');
+  }
+  var n = parseFloat(s);
+  return isFinite(n) ? n : null;
+}
+
+var i, e, n;
+
+// 1. the basket line being acted on. FIRST, for the same reason the SKU chain leads with the clicked
+//    form: with several lines in the basket, gtag's newest items[] entry belongs to whichever product
+//    was touched last, so removing a different line would report that other line's price.
+//    `.basket-item__price-now` is the UNIT price (measured: £499.99 shown at qty 2, with
+//    "Save £150.00" = 649.99 - 499.99 per unit), which is what this field wants — quantity is its own.
+try {
+  var t = event && event.target;
+  if (t && t.closest) {
+    var line = t.closest('.js-basket-item');
+    if (line) {
+      // Queried one at a time, in priority order. A combined selector would return whichever
+      // matched element comes FIRST IN DOCUMENT ORDER, not first in the selector list.
+      // Markets template this slot differently: .basket-item__price-now on dyson.co.uk,
+      // .basket-item__price-is on dyson.co.jp. Both are leaf nodes holding just the price.
+      var pel = line.querySelector('.basket-item__price-now');
+      if (!pel) pel = line.querySelector('.basket-item__price-is');
+      if (!pel) pel = line.querySelector('.basket-item__price');
+      if (pel) { n = priceNum(pel.textContent); if (n != null) return n; }
+    }
+  }
+} catch (e1) {}
+
+// 2. gtag items[0].price
+var d = window.dyson_gtag_dl || [];
+for (i = d.length - 1; i >= 0; i--) {
+  e = d[i];
+  if (e && e[0] === 'event' && e[2] && e[2].items && e[2].items[0] && e[2].items[0].price != null) {
+    n = priceNum(e[2].items[0].price);
+    if (n != null) return n;
+  }
+}
+
+// 3. JSON-LD offers.price on a PDP — server-rendered, so it covers a PDP_VISITED whose gtag never
+//    flushed. Gated to page-product; elsewhere an offer block may describe a different product.
+//    It is a STRING in the markup ("549.99"), so it must be parsed — a DECIMAL variable returning a
+//    numeric string fails the engine type check and the whole event is dropped.
+try {
+  var pt = (window.dataLayer && window.dataLayer.pageInfo && window.dataLayer.pageInfo.pageType) || '';
+  if (pt.indexOf('page-product') !== -1) {
+    var ld = document.querySelectorAll('script[type="application/ld+json"]');
+    for (i = 0; i < ld.length; i++) {
+      try {
+        var stack = [JSON.parse(ld[i].textContent)];
+        while (stack.length) {
+          var node = stack.pop();
+          if (!node || typeof node !== 'object') continue;
+          if (node.price != null) { n = priceNum(node.price); if (n != null) return n; }
+          if (Array.isArray(node)) { for (var a = 0; a < node.length; a++) stack.push(node[a]); }
+          else { if (node.offers) stack.push(node.offers); if (node['@graph']) stack.push(node['@graph']); }
+        }
+      } catch (e2) {}
+    }
+  }
+} catch (e3) {}
+
+// null, NOT 0. `price` is optional, so null omits the field, whereas 0 is accepted as a real price
+// and silently understates revenue — the engine only skips validation when the value is nullish.
+return null;
+/* */},"scope":"LOCAL"},{"id":"6bc01360-ae66-4f0a-81c5-894669a4e19b","name":"[Hybris] Product Quantity","type":"FUNCTION","valueType":"INTEGER","function":function(event){var i, e, n;
+
+// 1. the basket line being acted on. gtag carries no items on a plain basket load, so before this
+//    tier existed every REMOVE_FROM_CART fell through to the hardcoded 1 below and under-reported
+//    any multi-unit line. Measured live: a line holding qty 2 was reported as quantity 1.
+//    This never showed up as a failure precisely because the default always produced a value.
+try {
+  var t = event && event.target;
+  if (t && t.closest) {
+    var line = t.closest('.js-basket-item');
+    if (line) {
+      // Query the input on its own. A <span class="basket-item__quantity-number"> sits EARLIER in
+      // the line than the real <input name="quantity" class="basket-item__quantity-number">, so a
+      // combined selector returns the span first and its undefined .value parses to NaN.
+      var q = line.querySelector('input[name="quantity"]');
+      if (q) { n = parseInt(q.value, 10); if (n > 0) return n; }
+      var qs = line.querySelector('.basket-item__quantity-number');
+      if (qs) { n = parseInt(qs.value != null ? qs.value : qs.textContent, 10); if (n > 0) return n; }
+    }
+  }
+} catch (e1) {}
+
+// 2. gtag items
+var d = window.dyson_gtag_dl || [];
+for (i = d.length - 1; i >= 0; i--) {
+  e = d[i];
+  if (e && e[0] === 'event' && e[2] && e[2].items && e[2].items[0] && e[2].items[0].quantity != null) {
+    n = parseInt(e[2].items[0].quantity, 10);
+    if (n > 0) return n;
+  }
+}
+
+// 3. one unit. Correct for an add-to-cart, which adds a single unit on this site, and it is the
+//    long-standing behaviour for every other row — so it stays as the floor rather than null.
+return 1;
+/* */},"scope":"LOCAL"},{"id":"8b7e3d50-eeb8-4e50-84ec-2c29aef29284","name":"[Hybris] Product SKU","type":"FUNCTION","valueType":"TEXT","function":function(event){function skuTxt(v) {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    v = v.globalProductSKU || v.localProductSKU || v.sku || v.item_id || v.localProductID || '';
+  }
+  v = String(v).trim();
+  return (v && v !== '[object Object]') ? v : '';
+}
+
+var s;
+
+// Is this the page's own product template? Same check the PDP_VISITED and ADD_TO_CART (PDP)
+// triggers gate on, so the DOM tiers can never disagree with the trigger that fired.
+function isPdp() {
+  try {
+    var pt = (window.dataLayer && window.dataLayer.pageInfo && window.dataLayer.pageInfo.pageType) || '';
+    return pt.indexOf('page-product') !== -1;
+  } catch (e) { return false; }
+}
+
+// Tier A — the form/row being acted on. Authoritative for clicks, because it is what the site
+// POSTs for THIS row. Basket remove form carries input[name=code]; add-to-basket form carries
+// input[name=product]. Must outrank gtag: with two lines in the basket, gtag's newest items[]
+// entry is whichever product was touched last. Measured with 589598-01 and 499085-01 in the
+// basket: gtag-first returned 589598-01 for BOTH remove buttons; this returns each line correctly.
+function fromTarget() {
+  try {
+    var t = event && event.target;
+    if (!t || !t.closest) return '';
+    var f = t.closest('form');
+    if (f) {
+      var inp = f.querySelector('input[name="code"],input[name="product"],input[name="productCode"]');
+      if (inp) { var a = skuTxt(inp.value); if (a) return a; }
+    }
+    var row = t.closest('[data-productcode],[data-product-code]');
+    if (row) return skuTxt(row.getAttribute('data-productcode') || row.getAttribute('data-product-code'));
+  } catch (e) {}
+  return '';
+}
+
+// Tier B — the PDP's own add-to-basket form. Server-rendered; the tracker loads at the end of
+// <body>, so this is always parsed before the 1200ms PDP_VISITED delay starts. PDP-only: on other
+// templates this form is an upsell for a DIFFERENT product.
+// Out-of-stock PDPs (stockStatus H/T) render no ATB form — tier C covers those.
+function fromAtbForm() {
+  if (!isPdp()) return '';
+  try {
+    var pf = document.querySelector('form.js-add-to-basket-ui input[name="product"]');
+    return pf ? skuTxt(pf.value) : '';
+  } catch (e) { return ''; }
+}
+
+// Tier C — .js-analytics[data-product], the page's own product block, server-rendered
+// (entity-escaped as &#34;). Present on in-stock and OOS PDPs; agrees with tier B wherever both exist.
+// Selector requires [data-product]: every PDP checked has a second .js-analytics without it, so a
+// bare '.js-analytics' only worked by document order.
+function fromJsAnalytics() {
+  if (!isPdp()) return '';
+  try {
+    var el = document.querySelector('.js-analytics[data-product]');
+    if (!el) return '';
+    var raw = el.getAttribute('data-product');
+    if (!raw) return '';
+    try { return skuTxt(JSON.parse(raw)); }
+    catch (e) { console.warn('[SSTR] sku: malformed data-product (len ' + raw.length + ')'); }
+  } catch (e2) {}
+  return '';
+}
+
+// Tier D — gtag. Page-level, but late: dyson_gtag_dl is empty right after load and view_item lands
+// afterwards, so on a PDP it ranks below the server-rendered tiers. Only product events count —
+// a future view_item_list / select_item from an upsell carousel must not win.
+var GTAG_EVENTS = { view_item: 1, add_to_cart: 1, remove_from_cart: 1 };
+function fromGtag() {
+  var d = window.dyson_gtag_dl || [];
+  for (var i = d.length - 1; i >= 0; i--) {
+    var e = d[i];
+    if (e && e[0] === 'event' && GTAG_EVENTS[e[1]] && e[2] && e[2].items && e[2].items[0]) {
+      var g = skuTxt(e[2].items[0].item_id);
+      if (g) return g;
+    }
+  }
+  return '';
+}
+
+// Order:
+//   click (has a target)  → A, gtag, B, C
+//   page load (no target) → B, C, gtag
+// Clicks keep gtag ahead of the DOM tiers: if A misses on an upsell tile on a PDP, gtag's
+// add_to_cart (present by the end of the 2500ms delay) names the clicked item, while B/C would
+// name the page's product. Page loads put the server-rendered tiers first because gtag is late.
+var isClick = !!(event && event.target && event.target.closest);
+if (isClick) {
+  s = fromTarget();      if (s) return s;
+  s = fromGtag();        if (s) return s;
+  s = fromAtbForm();     if (s) return s;
+  s = fromJsAnalytics(); if (s) return s;
+} else {
+  s = fromAtbForm();     if (s) return s;
+  s = fromJsAnalytics(); if (s) return s;
+  s = fromGtag();        if (s) return s;
+}
+
+// Deliberately NO JSON-LD tier and NO productEvent tier.
+//   * JSON-LD: the live UK PDP Product block has no sku, mpn or productID. Dead code.
+//   * productEvent: holds the most-recently ADDED sku. On PDP_VISITED that is some earlier
+//     product — turns a visible MISSING_VALUE into a silently wrong attribution.
+// Also NO page-level [data-product-code] tier: on a PDP the first match in document order is an
+// upsell tile (Airwrap Co-anda2x PDP: page 596885-01, first [data-product-code] 264192-01).
+return '';
+/* */},"scope":"LOCAL"},{"id":"88b6a8bd-9ef2-48ee-af13-38bbb0bdc7a8","name":"[Hybris] Purchase Currency","type":"FUNCTION","valueType":"TEXT","function":function(event){var SITE_CCY = {
+  GB:'GBP', UK:'GBP', IE:'EUR', DE:'EUR', AT:'EUR', FR:'EUR', IT:'EUR', ES:'EUR', NL:'EUR',
+  BE:'EUR', LU:'EUR', PT:'EUR', FI:'EUR', GR:'EUR', CH:'CHF', SE:'SEK', NO:'NOK',
+  DK:'DKK', PL:'PLN', CZ:'CZK', HU:'HUF', RO:'RON', TR:'TRY',
+  US:'USD', CA:'CAD', MX:'MXN', BR:'BRL', AU:'AUD', NZ:'NZD', JP:'JPY', CN:'CNY',
+  HK:'HKD', TW:'TWD', SG:'SGD', MY:'MYR', TH:'THB', ID:'IDR', PH:'PHP',
+  IN:'INR', KR:'KRW', AE:'AED', SA:'SAR', ZA:'ZAR', IL:'ILS'
+};
+// Last-ditch, for a page serving a bare `lang="de"` with no region. Ambiguous by nature (de could be
+// AT or CH), but the ambiguous euro markets all land on EUR anyway, and any code beats '' — which is
+// an invalid enum that drops the event outright.
+var LANG_CCY = {
+  EN:'', DE:'EUR', FR:'EUR', IT:'EUR', ES:'EUR', NL:'EUR', PT:'EUR', FI:'EUR', EL:'EUR',
+  SV:'SEK', NB:'NOK', NO:'NOK', DA:'DKK', PL:'PLN', CS:'CZK', HU:'HUF', RO:'RON', TR:'TRY',
+  JA:'JPY', KO:'KRW', ZH:'CNY', TH:'THB', ID:'IDR', MS:'MYR', HE:'ILS'
+};
+var CCY_VALID = /^[A-Z]{3}$/;
+function ccyNorm(v) {
+  if (v == null) return '';
+  v = String(v).trim().toUpperCase();
+  return CCY_VALID.test(v) ? v : '';
+}
+function ccyFromCountry(v) {
+  if (v == null) return '';
+  return SITE_CCY[String(v).trim().toUpperCase()] || '';
+}
+// `en` is deliberately blank above: English alone says nothing about the market (GB/US/CA/AU/IE all
+// serve it), so guessing there would be worse than leaving the next tier to try.
+function ccyFromLang(v) {
+  if (v == null) return '';
+  return LANG_CCY[String(v).trim().toUpperCase()] || '';
+}
+// Country-code TLD. Deterministic, present before any script runs, and immune to every timing
+// problem the tiers above can hit — which is exactly why it is the floor rather than a shortcut:
+// a ccTLD is where the storefront is registered, not necessarily the market a page prices in.
+// A gTLD (.com/.net) carries no market, so it correctly yields '' and changes nothing.
+// SITE_CCY maps both GB and UK, so .co.uk resolves without a special case.
+function ccyFromHostname(h) {
+  if (!h) return '';
+  var parts = String(h).toLowerCase().split('.');
+  var tld = parts[parts.length - 1];
+  if (!/^[a-z]{2}$/.test(tld)) return '';
+  return ccyFromCountry(tld);
+}
+
+var c;
+
+try {
+  // 1. explicit attribute on .js-analytics
+  var el = document.querySelector('.js-analytics');
+  if (el) {
+    c = ccyNorm(el.getAttribute('data-currency') || el.getAttribute('data-currency-code') || el.getAttribute('currency'));
+    if (c) return c;
+
+    // 2. inside the data-order JSON blob
+    var raw = el.getAttribute('data-order');
+    if (raw) {
+      try {
+        var o = JSON.parse(raw);
+        c = ccyNorm(o && (o.currency || o.currencyCode || o.orderCurrency || (o.totals && o.totals.currency)));
+        if (c) return c;
+      } catch (e1) {
+        console.warn('[SSTR] currency: malformed data-order (len ' + raw.length + ')');
+      }
+    }
+  }
+
+  // 3. any other element declaring a currency
+  var anyEl = document.querySelector('[data-currency],[data-currency-code]');
+  if (anyEl) {
+    c = ccyNorm(anyEl.getAttribute('data-currency') || anyEl.getAttribute('data-currency-code'));
+    if (c) return c;
+  }
+
+  // 4. dataLayer, newest entry first
+  var dl = window.dataLayer || [];
+  for (var i = dl.length - 1; i >= 0; i--) {
+    var ev = dl[i];
+    if (!ev) continue;
+    c = ccyNorm(ev.currency || ev.currencyCode ||
+                (ev.order && (ev.order.currency || ev.order.currencyCode)) ||
+                (ev.ecommerce && ev.ecommerce.currency));
+    if (c) return c;
+    if (Array.isArray(ev) && ev[0] === 'event' && ev[2]) {
+      c = ccyNorm(ev[2].currency || ev[2].currencyCode);
+      if (c) return c;
+    }
+  }
+
+  // 5. gtag data layer
+  var d = window.dyson_gtag_dl || [];
+  for (var g = d.length - 1; g >= 0; g--) {
+    var ge = d[g];
+    if (ge && ge[0] === 'event' && ge[2] && ge[2].currency) {
+      c = ccyNorm(ge[2].currency);
+      if (c) return c;
+    }
+  }
+
+  // 6. structured data / meta declared by the page itself
+  var meta = document.querySelector(
+    'meta[property="product:price:currency"],' +
+    'meta[itemprop="priceCurrency"],' +
+    '[itemprop="priceCurrency"]'
+  );
+  if (meta) {
+    c = ccyNorm(meta.getAttribute('content') || meta.getAttribute('value') || meta.textContent);
+    if (c) return c;
+  }
+
+  // 7. market-derived — the tier the live script was missing, which is why it still returned ''
+  var pi = window.dataLayer && window.dataLayer.pageInfo;
+  if (pi && pi.pageCountryCode) { c = ccyFromCountry(pi.pageCountryCode); if (c) return c; }
+  for (var s = 0; s < d.length; s++) {
+    var se = d[s];
+    if (se && se[0] === 'config' && se[2] && se[2].site) {
+      c = ccyFromCountry(se[2].site);
+      if (c) return c;
+    }
+  }
+  var lg = (document.documentElement.lang || '').replace('_', '-').split('-');
+  if (lg.length > 1) { c = ccyFromCountry(lg[lg.length - 1]); if (c) return c; }
+  if (lg[0]) { c = ccyFromLang(lg[0]); if (c) return c; }
+
+  // 8. hostname ccTLD — the floor, same as [Hybris] Currency. This variable has no failures today,
+  //    so this is not fixing an observed miss; it is here because the shared helper ships with this
+  //    body anyway and an unresolved currencyCode aborts the whole PURCHASED event, losing the order
+  //    rather than one field. Reached only when tiers 1-7 all returned '', so it cannot change a
+  //    currency that already resolves.
+  c = ccyFromHostname(window.location.hostname);
+  if (c) return c;
+
+  console.warn('[SSTR] currencyCode unresolved — purchase will fail validation. Market: ' +
+    ((document.querySelector('.js-market-id') || {}).value || 'unknown'));
+} catch (e) {
+  console.warn('[SSTR] currency error', e);
+}
+return '';
+/* */},"scope":"LOCAL"},{"id":"2167ddfd-6a87-44e3-b8a0-432cae74008f","name":"[Hybris] Purchase Products","type":"FUNCTION","valueType":"LIST","function":function(event){function zvEl() { return document.querySelector('.js-analytics'); }
+
+function zvJSON(el, attr) {
+  if (!el) return null;
+  var raw = el.getAttribute(attr);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) {
+    console.warn('[SSTR] Malformed ' + attr + ' (len ' + raw.length + ')');
+    return null;
+  }
+}
+
+try {
+  var el = document.querySelector('.js-analytics');
+  if (!el) { console.warn('[SSTR] .js-analytics not found — purchase not sent'); return []; }
+
+  var arr = null;
+  var rawP = el.getAttribute('data-products');
+  if (rawP) {
+    try {
+      var dp = JSON.parse(rawP);
+      arr = Array.isArray(dp) ? dp : (dp && Array.isArray(dp.products) ? dp.products : null);
+    } catch (e2) {
+      console.warn('[SSTR] products: malformed data-products (len ' + rawP.length + ')');
+    }
+  }
+
+  if (!arr || !arr.length) { console.warn('[SSTR] products empty — purchase not sent'); return []; }
+
+  // Locale-safe: strips currency/spaces, decides , vs . by last separator position
+  var toNum = function (v) {
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    if (v == null || v === '') return null;
+    var s = String(v).replace(/[^\d.,\-]/g, '');
+    if (!s) return null;
+    var lastDot = s.lastIndexOf('.'), lastComma = s.lastIndexOf(',');
+    if (lastComma > lastDot) s = s.replace(/\./g, '').replace(',', '.');
+    else s = s.replace(/,/g, '');
+    var n = parseFloat(s);
+    return isFinite(n) ? n : null;
+  };
+
+  var pickName = function (p) {
+    var l = p.localWebNames, g = p.globalWebNames;
+    if (l && typeof l === 'object') { for (var k in l) if (l[k]) return String(l[k]); }
+    if (g && typeof g === 'object') { for (var k2 in g) if (g[k2]) return String(g[k2]); }
+    return p.localProductID != null ? String(p.localProductID) : '';
+  };
+
+  var out = [];
+  for (var i = 0; i < arr.length; i++) {
+    var p = arr[i] || {};
+
+    var sku = p.globalProductSKU || p.localSKU || p.localProductSKU || p.globalProductID || '';
+    if (!sku) console.warn('[SSTR] line ' + i + ': missing sku');
+
+    // Price source unchanged — salePrice, as agreed
+    var price = toNum(p.salePrice);
+
+    var qty = parseInt(p.quantity, 10);
+    if (isNaN(qty) || qty <= 0) { console.warn('[SSTR] line ' + i + ': invalid quantity'); qty = null; }
+
+    out.push({
+      sku: String(sku),
+      name: pickName(p),
+      pricePerUnit: price,   // null, not 0 — lets SSTR report the miss
+      quantity: qty
+    });
+  }
+  return out;
+} catch (e) {
+  console.warn('[SSTR] products error', e);
+  return [];
+}
+/* */},"scope":"LOCAL"},{"id":"fee80854-f9f4-4598-9e58-40ba22cce5e5","name":"[Hybris] Purchase Transaction Id","type":"FUNCTION","valueType":"TEXT","function":function(event){function zvEl() { return document.querySelector('.js-analytics'); }
+
+function zvJSON(el, attr) {
+  if (!el) return null;
+  var raw = el.getAttribute(attr);
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (e) {
+    console.warn('[SSTR] Malformed ' + attr + ' (len ' + raw.length + ')');
+    return null;
+  }
+}
+
+try {
+  var looksLikeOrderNo = function (v) {
+    v = String(v || '').trim();
+    if (!v) return '';
+    // Dyson order numbers are numeric (e.g. 1501406331). Reject cart GUIDs.
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v)) return '';
+    return v;
+  };
+
+  var el = document.querySelector('.js-analytics');
+  if (el) {
+    var raw = el.getAttribute('data-order');
+    if (raw) {
+      try {
+        var o = JSON.parse(raw);
+        var id = looksLikeOrderNo(o && (o.orderId || o.orderNumber || o.transactionId));
+        if (id) return id;
+      } catch (e1) {
+        console.warn('[SSTR] orderId: malformed data-order (len ' + raw.length + ')');
+      }
+    }
+    var t = looksLikeOrderNo(
+      el.getAttribute('data-order-id') ||
+      el.getAttribute('data-transaction-id') ||
+      el.getAttribute('data-order-number')
+    );
+    if (t) return t;
+  }
+
+  var dl = window.dataLayer || [];
+  for (var i = dl.length - 1; i >= 0; i--) {
+    var ev = dl[i];
+    if (!ev) continue;
+    var cand = ev.transaction_id ||
+               (ev.order && ev.order.orderId) ||
+               (ev.ecommerce && ev.ecommerce.transaction_id) ||
+               (Array.isArray(ev) && ev[0] === 'event' && ev[2] && ev[2].transaction_id);
+    var found = looksLikeOrderNo(cand);
+    if (found) return found;
+  }
+
+  // On-page confirmation number, last resort
+  var vis = document.querySelector('.js-order-confirmation, .order-confirmation');
+  if (vis) {
+    var m = (vis.textContent || '').match(/\b\d{8,14}\b/);
+    if (m) return m[0];
+  }
+
+  console.warn('[SSTR] transactionId unresolved — duplicate detection disabled for this event');
+} catch (e) {
+  console.warn('[SSTR] orderId error', e);
+}
+return '';
+/* */},"scope":"LOCAL"},{"id":"b9217479-dbe7-4ec3-918b-b4a375e7a284","name":"[Hybris] Search ATC SKU","type":"FUNCTION","valueType":"TEXT","function":function(event){function atcTxt(v) {
+  if (v == null) return '';
+  if (typeof v === 'object') {
+    v = v.globalProductSKU || v.localProductSKU || v.sku || v.item_id || v.localProductID || '';
+  }
+  v = String(v).trim();
+  if (!v || v === '[object Object]') return '';
+  // Adobe Target cards suffix the market onto the code, e.g. "589598-01GB"
+  var m = v.match(/\d{6}-\d{2}/);
+  return m ? m[0] : v;
+}
+
+var s, el;
+
+try {
+  var t = event && event.target;
+  if (t && t.closest) {
+    // 1. the add-to-basket form's own hidden input — this is what gets POSTed to the cart
+    var form = t.closest('form');
+    if (form) {
+      var inp = form.querySelector('input[name="product"],input[name="productCode"]');
+      if (inp) { s = atcTxt(inp.value); if (s) return s; }
+    }
+
+    // 2. the clicked listing tile
+    el = t.closest('[data-productcode],[data-product-code]');
+    if (el) {
+      s = atcTxt(el.getAttribute('data-productcode') || el.getAttribute('data-product-code'));
+      if (s) return s;
+    }
+
+    // 3. Adobe Target recommendation card — sku is region-suffixed, atcTxt strips it
+    el = t.closest('[sku],[data-sku]');
+    if (el) { s = atcTxt(el.getAttribute('sku') || el.getAttribute('data-sku')); if (s) return s; }
+  }
+} catch (e1) {}
+
+// 4. productEvent — needs no event, so it still covers a PAGE_LOAD-shaped invocation
+try {
+  var pe = window.dataLayer && window.dataLayer.productEvent;
+  if (pe && pe.length) { s = atcTxt(pe[0]); if (s) return s; }
+} catch (e2) {}
+
+return '';
+/* */},"scope":"LOCAL"},{"id":"a9336d79-1ed4-420e-b9bf-ddf7039cc425","name":"[Hybris] Search Is Empty","type":"FUNCTION","valueType":"BOOLEAN","function":function(event){var d = window.dyson_gtag_dl || [];
+var n = null;
+for (var i = d.length - 1; i >= 0; i--) {
+  var e = d[i];
+  if (e && e[0] === 'event' && e[1] === 'view_search_results' && e[2] && ('number_of_results' in e[2])) { n = e[2].number_of_results; break; }
+}
+if (n === null || n === undefined) return document.querySelectorAll('a[href*="machineId="]').length === 0;
+var num = (typeof n === 'number') ? n : parseInt(String(n), 10);
+return !(num > 0);
+/* */},"scope":"LOCAL"},{"id":"f56bc7ad-26e5-4353-9a26-5d31448e4e31","name":"[Hybris] Search SKUs","type":"FUNCTION","valueType":"LIST","function":function(event){var out = [], seen = {};
+var links = document.querySelectorAll('a[href*="machineId="]');
+for (var i = 0; i < links.length; i++) {
+  var m = (links[i].getAttribute('href') || '').match(/machineId=(\d{6}-\d{2})/);
+  if (m && !seen[m[1]]) { seen[m[1]] = 1; out.push(m[1]); }
+}
+return out;
+/* */},"scope":"LOCAL"},{"id":"eff494bb-18f9-4182-b410-805d97ee5d54","name":"[Hybris] Search Term","type":"FUNCTION","valueType":"TEXT","function":function(event){var d = window.dyson_gtag_dl || [];
+for (var i = d.length - 1; i >= 0; i--) {
+  var e = d[i];
+  if (e && e[0] === 'event' && e[1] === 'view_search_results' && e[2] && e[2].search_term) return e[2].search_term;
+}
+var q = new URLSearchParams(window.location.search).get('searchText') || '';
+return q.split(':')[0];
+/* */},"scope":"LOCAL"},{"id":"75cf8fd1-fafe-44be-9806-23ff3017c9c1","name":"Page URL","type":"FUNCTION","valueType":"TEXT","function":function(event){return window.location.href;
+/* */},"scope":"GLOBAL"}];
+    const script = {"id":"aeb15bcc-013c-4366-b426-5d08d255bb5e","rows":[{"id":"95e2de7e-2620-4bd9-92af-d17be86ea2a8","rowType":"CUSTOM_ACTION","trigger":{"id":"dab290ea-4166-4db3-b081-cff239712664","name":"[Hybris] Consent Sync (page load)","type":"PAGE_LOAD","groups":[{"id":"46adf1e9-2839-4328-b82a-8c73701f1b27","rows":[{"valueType":"TEXT","id":"52745cd4-d20a-4926-8125-dfe5aa857a05","variableId":"75cf8fd1-fafe-44be-9806-23ff3017c9c1","value":"dyson","operator":"CONTAINS"}]}]},"action":{"id":"85e46dad-4088-41f8-a31d-f4d829ad0dcf","type":"CUSTOM","code":function(event){var consented = false;
+try {
+  var active = window.OnetrustActiveGroups;
+  if (typeof active === 'string') {
+    consented = active.indexOf('C0003') !== -1 && active.indexOf('C0004') !== -1;
+  } else {
+    var cookie = document.cookie.match(/(?:^|;\s*)OptanonConsent=([^;]*)/);
+    var groups = cookie && /(?:^|&)groups=([^&]*)/.exec(cookie[1]);
+    var granted = groups ? decodeURIComponent(groups[1]) : '';
+    consented = granted.indexOf('C0003:1') !== -1 && granted.indexOf('C0004:1') !== -1;
+  }
+} catch (e) {
+  consented = false;
+}
+if (consented) { enableTracking(); } else { disableTracking(); }
+/* */}},"fields":[]},{"id":"5c4c4785-a140-4915-8bcc-68138c046118","rowType":"CUSTOM_ACTION","trigger":{"id":"0aefa4bb-d7af-46e4-b1b7-4cee08470e6b","name":"[Hybris] Consent Sync (OneTrust click)","type":"CLICK","delayMs":500,"groups":[{"id":"541270ba-313e-4701-bc2e-ab37dcfb7002","rows":[{"valueType":"EVENT","id":"a45299bf-7a72-4f15-ae2f-f82accb6896e","variableId":"ad6080ea-719b-4732-952f-ef4f1ce45e02","value":"#onetrust-consent-sdk button, #onetrust-consent-sdk button *","operator":"MATCHES_CSS_SELECTOR"}]}]},"action":{"id":"85e46dad-4088-41f8-a31d-f4d829ad0dcf","type":"CUSTOM","code":function(event){var consented = false;
+try {
+  var active = window.OnetrustActiveGroups;
+  if (typeof active === 'string') {
+    consented = active.indexOf('C0003') !== -1 && active.indexOf('C0004') !== -1;
+  } else {
+    var cookie = document.cookie.match(/(?:^|;\s*)OptanonConsent=([^;]*)/);
+    var groups = cookie && /(?:^|&)groups=([^&]*)/.exec(cookie[1]);
+    var granted = groups ? decodeURIComponent(groups[1]) : '';
+    consented = granted.indexOf('C0003:1') !== -1 && granted.indexOf('C0004:1') !== -1;
+  }
+} catch (e) {
+  consented = false;
+}
+if (consented) { enableTracking(); } else { disableTracking(); }
+/* */}},"fields":[]},{"id":"4a35ca55-1cac-439a-9cef-6ec69640e780","rowType":"EVENT","trigger":{"id":"2b23c41b-3ac6-465c-bc1f-c466a1b31471","name":"[Hybris] PAGE_VISITED (non-PDP)","type":"PAGE_LOAD","groups":[{"id":"f212f5fb-6c1d-4d25-a663-da57a27282de","rows":[{"valueType":"TEXT","id":"c4100106-2ea1-4669-bfb3-6424ab4d46a2","variableId":"f91db08a-1f19-457a-950d-de0827a27202","value":"page-product","operator":"DOES_NOT_CONTAIN"}]}]},"action":{"type":"PAGE_VISITED"},"fields":[{"id":"aa4a4533-f7d6-4a6f-a8b7-59cef61f61ba","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"bc2c5e74-32b9-4ee2-b5c9-b82d59ea952d","variableId":"1913db35-aefa-4690-aa66-b96a12e29e36","fieldName":"category"}]},{"id":"06b05517-cae8-410c-ab61-4c1f9eeaf541","rowType":"EVENT","trigger":{"id":"5be3f84e-924e-4ba6-b126-7bfe1402eb9c","name":"[Hybris] PDP_VISITED","type":"PAGE_LOAD","delayMs":1200,"groups":[{"id":"6b175364-7562-43dc-9768-e07450fb225d","rows":[{"valueType":"TEXT","id":"f833fc6d-4600-4662-8a26-9ae1237de017","variableId":"f91db08a-1f19-457a-950d-de0827a27202","value":"page-product","operator":"CONTAINS"}]}]},"action":{"type":"PDP_VISITED"},"fields":[{"id":"6795dbe2-467c-4d98-82b4-51531d77f49b","variableId":"8b7e3d50-eeb8-4e50-84ec-2c29aef29284","fieldName":"sku"},{"id":"74fb895a-d0a4-43ac-8632-fa5e1193a9e2","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"e1cf59a1-996a-4deb-aa78-391918b43c94","variableId":"32861da7-7fe1-4beb-bb0c-009a3e713bf4","fieldName":"price"},{"id":"d0827860-28af-4c38-af4b-2357588e076b","variableId":"cc8eb6c6-23e8-43ec-8a01-ee51002e1f0e","fieldName":"currencyCode"},{"id":"34085bd0-ce7d-48b4-902a-be480ca16e3a","variableId":"6bc01360-ae66-4f0a-81c5-894669a4e19b","fieldName":"quantity"},{"id":"b7fec48d-3293-40c7-839b-08f68953cede","variableId":"d9a137cc-860f-4e3c-8c22-a03bcbbf93d8","fieldName":"category"}]},{"id":"6c40e117-8ed2-4f8a-829a-485dd1beda3f","rowType":"EVENT","trigger":{"id":"637111ae-ada8-41df-9e1a-6312cf3f10f7","name":"[Hybris] ADD_TO_CART (PDP)","type":"CLICK","delayMs":2500,"groups":[{"id":"365d0783-85b6-45a3-a922-02cd553749a1","rows":[{"valueType":"EVENT","id":"7042de73-149d-4a1b-999d-aed4156634ad","variableId":"ad6080ea-719b-4732-952f-ef4f1ce45e02","value":".js-add-to-basket-button, .js-add-to-basket-button *, .js-add-to-basket-ui *","operator":"MATCHES_CSS_SELECTOR"},{"valueType":"TEXT","id":"e9c909d6-a224-4253-85c6-047b8f43d9f5","variableId":"f91db08a-1f19-457a-950d-de0827a27202","value":"page-product","operator":"CONTAINS"}]}]},"action":{"type":"ADD_TO_CART"},"fields":[{"id":"ca4119b9-3b19-4c0d-ad92-c6870035e4e1","variableId":"8b7e3d50-eeb8-4e50-84ec-2c29aef29284","fieldName":"sku"},{"id":"df51ffb3-1765-4ff2-a240-12ec7a589e00","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"f1ab274a-9597-498d-b82e-53186639f709","variableId":"32861da7-7fe1-4beb-bb0c-009a3e713bf4","fieldName":"price"},{"id":"1f1cb86d-22e2-4ea0-994d-b2f50dcc5a62","variableId":"cc8eb6c6-23e8-43ec-8a01-ee51002e1f0e","fieldName":"currencyCode"},{"id":"2106475f-3a97-41f2-8f77-4874afca3079","variableId":"6bc01360-ae66-4f0a-81c5-894669a4e19b","fieldName":"quantity"},{"id":"0b928c30-1c63-4512-b933-530953b5a725","variableId":"d9a137cc-860f-4e3c-8c22-a03bcbbf93d8","fieldName":"category"}]},{"id":"564291f9-4486-4ee8-aaa6-1a86ddd539fd","rowType":"EVENT","trigger":{"id":"43a017cf-5210-413d-a25c-1161665aea64","name":"[Hybris] ADD_TO_CART (listing)","type":"CLICK","delayMs":2500,"groups":[{"id":"12a87f8f-cca5-432c-b91f-892a375f4d44","rows":[{"valueType":"EVENT","id":"2fe3e146-c601-400b-b771-b79b8b53ed7d","variableId":"ad6080ea-719b-4732-952f-ef4f1ce45e02","value":".js-add-to-basket-button, .js-add-to-basket-button *, .js-add-to-basket-ui *","operator":"MATCHES_CSS_SELECTOR"},{"valueType":"TEXT","id":"4c56936c-d835-4905-bb87-8b6ba564e90f","variableId":"f91db08a-1f19-457a-950d-de0827a27202","value":"page-product","operator":"DOES_NOT_CONTAIN"}]}]},"action":{"type":"ADD_TO_CART"},"fields":[{"id":"bc740677-077b-4db4-9843-b96ab472c989","variableId":"b9217479-dbe7-4ec3-918b-b4a375e7a284","fieldName":"sku"},{"id":"4155d725-7cc4-426c-83dd-f5c1ba7fdc49","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"a4126791-806a-4352-90e7-a7b18f4ecdde","variableId":"6bc01360-ae66-4f0a-81c5-894669a4e19b","fieldName":"quantity"}]},{"id":"58b6cb9c-3a1d-4227-9d90-bb4a71c665f5","rowType":"EVENT","trigger":{"id":"32ff1d26-06ec-413e-941f-c2f972dcf283","name":"[Hybris] REMOVE_FROM_CART","type":"CLICK","delayMs":1000,"groups":[{"id":"e794fafb-9b24-4e7f-bbe0-76a8e79db818","rows":[{"valueType":"EVENT","id":"a83ec313-08df-4d5d-abed-be7f653b5f5f","variableId":"ad6080ea-719b-4732-952f-ef4f1ce45e02","value":"button.js-basket-item-remove-confirm, button.js-basket-item-remove-confirm *","operator":"MATCHES_CSS_SELECTOR"}]}]},"action":{"type":"REMOVE_FROM_CART"},"fields":[{"id":"57cd8539-ee31-4338-b7d6-8752dcc8e8f2","variableId":"8b7e3d50-eeb8-4e50-84ec-2c29aef29284","fieldName":"sku"},{"id":"1c9515c0-cfb0-4773-8b55-f4c9acdfd2e1","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"30e3537e-c60c-4af4-8e8a-70c904636762","variableId":"32861da7-7fe1-4beb-bb0c-009a3e713bf4","fieldName":"price"},{"id":"d612a9d8-94b7-4bce-aa16-4f9f82903a9c","variableId":"cc8eb6c6-23e8-43ec-8a01-ee51002e1f0e","fieldName":"currencyCode"},{"id":"4b70da5a-8783-4665-a75c-101ccb21d2ed","variableId":"6bc01360-ae66-4f0a-81c5-894669a4e19b","fieldName":"quantity"},{"id":"6c98fce2-1416-48b6-914b-a2ec9ef4ed16","variableId":"d9a137cc-860f-4e3c-8c22-a03bcbbf93d8","fieldName":"category"}]},{"id":"1285a94d-bc94-49c9-84b9-22530ad5e4ea","rowType":"EVENT","trigger":{"id":"43ff10b7-3d6d-4a75-8ff2-1370e65d2250","name":"[Hybris] SEARCH Results Page","type":"PAGE_LOAD","delayMs":2500,"groups":[{"id":"d683a55b-39e8-429c-9571-319ac69f33a5","rows":[{"valueType":"TEXT","id":"4703fc10-6fe2-4f34-8788-9428bbb19f1c","variableId":"f91db08a-1f19-457a-950d-de0827a27202","value":"page-search","operator":"CONTAINS"}]}]},"action":{"type":"SEARCH"},"fields":[{"id":"3bedec7b-043f-41e1-ae22-84bfd5cf30c5","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"7da768a9-16e8-4c3a-ae6e-039df3f0e087","variableId":"eff494bb-18f9-4182-b410-805d97ee5d54","fieldName":"eventLabel"}]},{"id":"4ca1e4ea-70e1-400e-adbe-7b4c7b1339d6","rowType":"EVENT","trigger":{"id":"43ff10b7-3d6d-4a75-8ff2-1370e65d2250","name":"[Hybris] SEARCH Results Page","type":"PAGE_LOAD","delayMs":2500,"groups":[{"id":"d683a55b-39e8-429c-9571-319ac69f33a5","rows":[{"valueType":"TEXT","id":"4703fc10-6fe2-4f34-8788-9428bbb19f1c","variableId":"f91db08a-1f19-457a-950d-de0827a27202","value":"page-search","operator":"CONTAINS"}]}]},"action":{"type":"SEARCH_RESULT"},"fields":[{"id":"34cdd23f-f278-47af-926a-02252e134a6f","variableId":"2c534d74-fba5-4461-9b40-afe70219bf4e","fieldName":"locale"},{"id":"32b1a223-6421-42e8-b86a-373f05488753","variableId":"a9336d79-1ed4-420e-b9bf-ddf7039cc425","fieldName":"isEmpty"},{"id":"30e44f6a-7a34-4960-9c09-aaadf30d612b","variableId":"f56bc7ad-26e5-4353-9a26-5d31448e4e31","fieldName":"skus"},{"id":"e7ec5e50-0c6a-42ec-8d79-269e9d8c7b60","variableId":"eff494bb-18f9-4182-b410-805d97ee5d54","fieldName":"eventLabel"}]},{"id":"538e142f-87e5-4d42-968b-04b79ae11eb4","rowType":"EVENT","trigger":{"id":"d59e92bb-5a6d-4026-8eb8-97b9c0fbae44","name":"[Hybris] PURCHASED","type":"PAGE_LOAD","delayMs":5000,"groups":[{"id":"d8e5bd3f-1c29-4566-823c-4b98567ead79","rows":[{"valueType":"TEXT","id":"24b6a7ac-db51-4bae-9f34-b0645e4b7228","variableId":"75cf8fd1-fafe-44be-9806-23ff3017c9c1","value":"/order-confirmation","operator":"CONTAINS"}]}]},"action":{"type":"PURCHASED"},"fields":[{"id":"f9718a36-f96c-495d-bd5e-90ce233012d0","variableId":"88b6a8bd-9ef2-48ee-af13-38bbb0bdc7a8","fieldName":"currencyCode"},{"id":"45bef46c-6024-41c9-8114-1e2c566fb306","variableId":"2167ddfd-6a87-44e3-b8a0-432cae74008f","fieldName":"products"},{"id":"f5e3cb9f-dddd-48d2-b298-7ab7b79d8993","variableId":"fee80854-f9f4-4598-9e58-40ba22cce5e5","fieldName":"transactionId"}]}]};
+    const advancedCode = function(){};
+    const url = 'https://queue-propagator.zoovu.com';
+    const currentEnvironment = 'orca';
+    const currentAccountId = 3600;
+    const currencies = ['FJD', 'STD', 'MXN', 'SCR', 'LVL', 'CDF', 'BBD', 'HNL', 'UGX', 'ZAR', 'MXV', 'STN', 'CUC', 'BSD', 'SDD', 'SDG', 'IQD', 'GMD', 'CUP', 'TWD', 'RSD', 'UYI', 'MYR', 'FKP', 'XOF', 'UYU', 'CVE', 'OMR', 'KES', 'SEK', 'BTN', 'GNF', 'MZN', 'SVC', 'MZM', 'ARS', 'QAR', 'NLG', 'IRR', 'XPD', 'XPF', 'THB', 'UZS', 'BDT', 'LYD', 'KWD', 'XPT', 'RUB', 'ISK', 'BEF', 'MKD', 'RUR', 'DZD', 'PAB', 'SGD', 'KGS', 'XAD', 'XAF', 'XAG', 'HRK', 'CHF', 'ITL', 'ATS', 'CHE', 'DJF', 'TZS', 'XAU', 'VND', 'ADP', 'AUD', 'CHW', 'KHR', 'IDR', 'XBA', 'KYD', 'XBC', 'XBB', 'BWP', 'SHP', 'XBD', 'CYP', 'TJS', 'AED', 'RWF', 'DKK', 'BGL', 'ZWD', 'BGN', 'MMK', 'SYP', 'ZWG', 'NOK', 'ZWL', 'YUM', 'ZWN', 'LKR', 'ZWR', 'IEP', 'CZK', 'XCD', 'GRD', 'HTG', 'XSU', 'AFA', 'XCG', 'SIT', 'BHD', 'PTE', 'SZL', 'KZT', 'YER', 'AFN', 'BYB', 'NPR', 'AWG', 'MNT', 'GBP', 'BYN', 'XTS', 'HUF', 'BYR', 'BIF', 'XUA', 'XDR', 'BZD', 'MOP', 'NAD', 'SKK', 'TMM', 'PEN', 'WST', 'TMT', 'FRF', 'CLF', 'GTQ', 'CLP', 'TND', 'SLE', 'SLL', 'AYM', 'XFO', 'DOP', 'KMF', 'XFU', 'GEL', 'MAD', 'AZM', 'TOP', 'AZN', 'PGK', 'UAH', 'ERN', 'TPE', 'MRO', 'CNY', 'MRU', 'BMD', 'PHP', 'XXX', 'PYG', 'JMD', 'GWP', 'ESP', 'COP', 'USD', 'COU', 'USN', 'VEB', 'ETB', 'VED', 'USS', 'VEF', 'SOS', 'VUV', 'LAK', 'BND', 'ZMK', 'LRD', 'ALL', 'GHC', 'MTL', 'ZMW', 'VES', 'TRL', 'ILS', 'GYD', 'KPW', 'GHS', 'MDL', 'BOB', 'AMD', 'TRY', 'LBP', 'JOD', 'HKD', 'EUR', 'LSL', 'CAD', 'BOV', 'EEK', 'MUR', 'ROL', 'GIP', 'RON', 'NGN', 'CRC', 'PKR', 'ANG', 'SRD', 'LTL', 'TTD', 'SAR', 'MVR', 'SRG', 'INR', 'KRW', 'JPY', 'PLN', 'AOA', 'SBD', 'CSD', 'LUF', 'MWK', 'MGA', 'FIM', 'MGF', 'DEM', 'BAM', 'EGP', 'SSP', 'NIO', 'NZD', 'BRL']
+
+    // ------------------------- API -------------------------
+let trackingEnabled = true;
+let hasLauncher = typeof advancedCode === 'function' && advancedCode.toString().includes('/behavioral-launchers-script');
+let signalReady = false;
+let signalReadyPromise = null;
+let signalCheckAttempts = 0;
+const MAX_SIGNAL_CHECK_ATTEMPTS = 20; // 20 attempts
+const SIGNAL_CHECK_INTERVAL_MS = 200; // Check every 200ms (total 4 seconds max wait)
+let eventQueue = [];
+
+function logDebug(...args) {
+    if (typeof console !== 'undefined' && typeof console.debug === 'function') {
+        console.debug(...args);
+    }
+}
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function disableTracking() {
+    trackingEnabled = false;
+}
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function enableTracking() {
+    trackingEnabled = true;
+}
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function getNumericPriceFromString(stringPrice) {
+  const parsedPrice = stringPrice
+    .replace(/\.$/, '')
+    .replace(/([^.',\s\d])*/g, '')
+    .replace(/([.',\s](?=\d{3}))/g, '')
+    .replace(/([.',](?=\d{2}))/g, '.')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/\.+(?=\.)/g, '')
+    .replace(/\.$/, '');
+  if (parsedPrice === '') {
+    throw new Error(`getNumericPriceFromString: "${stringPrice}" is not a valid price (no numeric value found).`);
+  }
+  const numericPrice = Number(parsedPrice);
+  if (Number.isNaN(numericPrice)) {
+    throw new Error(`getNumericPriceFromString: "${stringPrice}" is not a valid price (parsed to NaN).`);
+  }
+  return numericPrice;
+}
+
+// helper for loading launcher from advancedmode
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function loadLauncher(launcherUrl, callback, id) {
+    if (launcherUrl) {
+        const script = document.createElement('script');
+        script.type = 'text/javascript';
+        script.src = launcherUrl;
+        script.id = id || 'zv-launcher';
+        script.onload = callback;
+        document.head.appendChild(script);
+    }
+}
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function setSignalReady() {
+    signalReady = true;
+
+    if (eventQueue.length > 0) {
+        logDebug(`Signal ready - flushing ${eventQueue.length} queued events`);
+        const eventsToFlush = [...eventQueue];
+        eventQueue = [];
+        eventsToFlush.forEach(queuedEvent => {
+            sendEventImmediately(queuedEvent);
+        });
+    }
+}
+
+if (typeof window !== 'undefined') {
+    if (typeof window.ZoovuTrackingManager === 'undefined') {
+        window.ZoovuTrackingManager = {};
+    }
+    window.ZoovuTrackingManager.setSignalReady = setSignalReady;
+}
+
+class TrackingExecutionError extends Error {
+    constructor(message, trackingEntityType, variableId, triggerId, scriptId, trackingErrorType) {
+        super(message);
+        this.trackingEntityType = trackingEntityType;
+        this.variableId = variableId;
+        this.triggerId = triggerId;
+        this.scriptId = scriptId;
+        this.trackingErrorType = trackingErrorType;
+    }
+}
+
+// ------------------------- helpers -------------------------
+const eventTypes = Object.freeze({
+    PAGE_VISITED: "PAGE_VISITED",
+    ADD_TO_CART: "ADD_TO_CART",
+    REMOVE_FROM_CART: "REMOVE_FROM_CART",
+    PDP_VISITED: "PDP_VISITED",
+    PURCHASED: "PURCHASED",
+    UPDATE_CART: "UPDATE_CART",
+    DECLINE_TRACKING: "DECLINE_TRACKING",
+    SEARCH: "SEARCH",
+    SEARCH_RESULT: "SEARCH_RESULT",
+    CLICKOUT: "CLICKOUT",
+    LEAD_GEN: "LEAD_GEN"
+});
+const trackingEventTypes = Object.freeze({
+    TRACKING_SUCCESSFUL_EXECUTION: 'TRACKING_SUCCESSFUL_EXECUTION',
+    TRACKING_EXECUTION_FAILURE: 'TRACKING_EXECUTION_FAILURE'
+})
+const actionTypes = Object.freeze({
+    ...eventTypes,
+    CUSTOM: 'CUSTOM'
+})
+const triggerTypes = Object.freeze({
+    CLICK: 'CLICK',
+    INPUT: 'INPUT',
+    PAGE_LOAD: 'PAGE_LOAD'
+});
+const variableTypes = Object.freeze({
+    FUNCTION: 'FUNCTION',
+    CONSTANT: 'CONSTANT'
+});
+const trackingEntityTypes = Object.freeze({
+    VARIABLE: 'VARIABLE',
+    TRIGGER: 'TRIGGER',
+    CUSTOM_ACTION: 'CUSTOM_ACTION'
+});
+const trackingErrorTypes = Object.freeze({
+    MISSING_VALUE: 'MISSING_VALUE',
+    TYPE_MISMATCH: 'TYPE_MISMATCH',
+    UNSUPPORTED_VARIABLE: 'UNSUPPORTED_VARIABLE',
+    MISSING_VARIABLE: 'MISSING_VARIABLE',
+    OTHER: 'OTHER'
+});
+const trackingVariableScopes = Object.freeze({
+    GLOBAL: 'GLOBAL',
+    LOCAL: 'LOCAL'
+});
+const namedReferrals = Object.freeze({
+    SEARCH: 'SEARCH'
+})
+const domainRestrictedFieldNames = Object.freeze({
+    CURRENCY_CODE: 'currencyCode',
+    NAMED_REFERRAL: 'namedReferral'
+});
+// Fields whose value must belong to a fixed domain. `optional: true` means nullish is accepted;
+// otherwise nullish is itself an incompatible value. Add new entries here to extend.
+const domainRestrictedFields = Object.freeze({
+    [domainRestrictedFieldNames.CURRENCY_CODE]: {
+        optional: true,
+        isValid: value => currencies.includes(value)
+    },
+    [domainRestrictedFieldNames.NAMED_REFERRAL]: {
+        optional: false,
+        isValid: value => value != null && !!namedReferrals[String(value).toUpperCase()]
+    }
+});
+const getElementAttribute = (target, attributeName) => {
+    const attribute = target[attributeName];
+    if (typeof attribute === 'string') {
+        return attribute;
+    }
+    if (attribute && attribute.baseVal !== undefined) {
+        return attribute.baseVal;
+    }
+    return target.getAttribute(attributeName === 'className' ? 'class' : attributeName) || '';
+};
+
+const getElementId = (target) => {
+    return getElementAttribute(target, 'id');
+};
+
+const getElementClassName = (target) => {
+    return getElementAttribute(target, 'className');
+};
+const matchers = Object.freeze({
+    EQUALS: (a, b) => a === b,
+    DOES_NOT_EQUAL: (a, b) => a !== b,
+    CONTAINS: (a, b) => a.indexOf(b) >= 0,
+    DOES_NOT_CONTAIN: (a, b) => a.indexOf(b) === -1,
+    GREATER_THAN: (a, b) => a > b,
+    LESS_THAN: (a, b) => a < b,
+    GREATER_THAN_OR_EQUAL: (a, b) => a >= b,
+    LESS_THAN_OR_EQUAL: (a, b) => a <= b,
+
+    MATCHES_CSS_SELECTOR: (target, test) => target.matches(test),
+    MATCHES_ID: (target, test) => getElementId(target) === test,
+    CONTAINS_ID: (target, test) => getElementId(target).includes(test),
+    DOES_NOT_CONTAIN_ID: (target, test) => !getElementId(target).includes(test),
+    MATCHES_CLASS: (target, test) => getElementClassName(target) === test,
+    CONTAINS_CLASS: (target, test) => getElementClassName(target).includes(test),
+    DOES_NOT_CONTAIN_CLASS: (target, test) => !getElementClassName(target).includes(test),
+
+    MATCHES_REGEX: (a, b) => parseRegexString(b).test(a),
+});
+
+const trackingFieldName = `${domainId}_${zoovuId}_trackingExecutions`
+const MAX_RECORDS = 100
+// helper to retrieve variableId later
+let eventFields = []
+
+if (!JSON.parse(localStorage.getItem(trackingFieldName))) {
+    localStorage.setItem(trackingFieldName, JSON.stringify([]))
+}
+
+function parseRegexString(input) {
+    const trimmed = input.trim();
+
+    // check if it starts and ends with slashes (e.g., /^abc$/gi)
+    const match = trimmed.match(/^\/(.+)\/([a-z]*)$/i);
+    if (match) {
+        const pattern = match[1];
+        const flags = match[2];
+        return new RegExp(pattern, flags);
+    }
+
+    // no flags
+    return new RegExp(trimmed);
+}
+
+function checkValue(type, value) {
+    switch (type) {
+        case 'BOOLEAN':
+            return value === true || value === 'true';
+        case 'TEXT':
+            return value;
+        case 'DECIMAL':
+            return typeof value === 'string' ? parseFloat(value) : value;
+        case 'INTEGER':
+            return typeof value === 'string' ? parseInt(value) : value;
+        default:
+            return value;
+    }
+}
+
+function cast(type, value) {
+    switch (type) {
+        case 'BOOLEAN':
+            return value === true || value === 'true';
+        case 'TEXT':
+            return value;
+        case 'DECIMAL':
+            return typeof value === 'string' ? parseFloat(value) : value;
+        case 'INTEGER':
+            return typeof value === 'string' ? parseInt(value) : value;
+        default:
+            return value;
+    }
+}
+
+function debounce(fn, delay, useTrailing = false) {
+  if (useTrailing) {
+    // Trailing debounce for INPUT triggers - only fires once after delay using requestAnimationFrame
+    let lastCallTime = 0;
+    let animationFrameId = null;
+    let hasScheduledExecution = false;
+    
+    function checkAndExecute(context, args) {
+      const currentTime = performance.now();
+      const timeSinceLastCall = currentTime - lastCallTime;
+      
+      if (timeSinceLastCall >= delay) {
+        // Delay has passed, execute the function
+        fn.apply(context, args);
+        hasScheduledExecution = false;
+      } else {
+        // Keep checking until delay has passed
+        animationFrameId = requestAnimationFrame(() => {
+          checkAndExecute(context, args);
+        });
+      }
+    }
+    
+    return function () {
+      const context = this, args = arguments;
+      lastCallTime = performance.now();
+      
+      if (!hasScheduledExecution) {
+        hasScheduledExecution = true;
+        animationFrameId = requestAnimationFrame(() => {
+          checkAndExecute(context, args);
+        });
+      }
+    };
+  }
+  
+  // Original requestAnimationFrame-based debounce for other triggers
+  let lastCallTime = 0;
+  let animationFrameId = null;
+  let isScheduled = false;
+
+  function execute(context, args, currentTime) {
+    if (currentTime - lastCallTime >= delay) {
+      fn.apply(context, args);
+      isScheduled = false;
+    } else {
+      animationFrameId = requestAnimationFrame((newTime) => {
+        execute(context, args, newTime);
+      });
+    }
+  }
+
+  return function () {
+    const context = this, args = arguments;
+    lastCallTime = performance.now();
+    
+    if (!isScheduled) {
+      isScheduled = true;
+      animationFrameId = requestAnimationFrame((currentTime) => {
+        execute(context, args, currentTime);
+      });
+    }
+  };
+}
+
+function getOrganization() {
+    return zoovuId;
+}
+
+function getDomainId() {
+    return domainId;
+}
+
+function getTimezone() {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
+function getReferrer() {
+    const referrer = document.referrer;
+    if (/^(https?|android-app):\/\//i.test(referrer)) {
+        return referrer;
+    } else {
+        return undefined;
+    }
+}
+
+function getPath() {
+    return window.location.href.replace(window.location.origin, '');
+}
+
+function getCookieValue(cookieName) {
+    const cookies = document.cookie.split('; ');
+    for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].split('=');
+        // Skip malformed cookies with multiple '=' signs
+        if (cookie.length !== 2) {
+            continue;
+        }
+        if (cookie[0] === cookieName) {
+            return cookie[1];
+        }
+    }
+    return null;
+}
+
+function getAllCookieValues(cookieName) {
+    const cookies = document.cookie.split('; ');
+    const values = [];
+    for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i].split('=');
+        // Skip malformed cookies with multiple '=' signs
+        if (cookie.length !== 2) {
+            continue;
+        }
+        if (cookie[0] === cookieName) {
+            values.push(cookie[1]);
+        }
+    }
+    return values;
+}
+
+function generateUuid() {
+    return self.crypto.randomUUID();
+}
+
+function isValidCidFormat(cid) {
+    // UUID (36 chars) or UUID_timestamp (36 + 1 + 13 = 50 chars)
+    // Max 60 chars to allow some buffer
+    return cid && cid.length <= 60;
+}
+
+let cachedRegistrableDomain = null;
+
+function getRegistrableDomain(hostname) {
+    if (cachedRegistrableDomain) {
+        return cachedRegistrableDomain;
+    }
+
+    const parts = hostname.split('.');
+    if (parts.length <= 2) {
+        cachedRegistrableDomain = hostname;
+        return hostname;
+    }
+
+    // Probe from broadest to narrowest domain level.
+    // Browsers refuse to set cookies on public suffixes (e.g. "co.uk"),
+    // so the first level that accepts a cookie is the registrable domain.
+    for (let i = 2; i <= parts.length; i++) {
+        const candidate = parts.slice(-i).join('.');
+        const probe = `__zoovu_probe_${Math.random().toString(36).slice(2, 10)}`;
+        document.cookie = `${probe}=1; domain=.${candidate}; path=/; max-age=10`;
+
+        if (getCookieValue(probe) !== null) {
+            // Clean up the probe cookie
+            document.cookie = `${probe}=; domain=.${candidate}; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+            cachedRegistrableDomain = candidate;
+            return candidate;
+        }
+    }
+
+    // Fallback – should rarely be reached
+    cachedRegistrableDomain = parts.slice(-2).join('.');
+    return cachedRegistrableDomain;
+}
+
+function removeZoovuCidCookie() {
+    const hostname = window.location.hostname;
+    const domain = getRegistrableDomain(hostname);
+    // Set expiration to past date to remove cookie
+    document.cookie = `zoovu-cid=; path=/; domain=.${domain}; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+    document.cookie = `zoovu-cid=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
+
+function removeMalformedZoovuCidCookies() {
+    const cookies = document.cookie.split('; ');
+    let hasMalformed = false;
+
+    // Check for structurally malformed cookies (multiple '=' signs)
+    for (let i = 0; i < cookies.length; i++) {
+        const parts = cookies[i].split('=');
+        if (parts[0] === 'zoovu-cid' && parts.length !== 2) {
+            hasMalformed = true;
+            break;
+        }
+    }
+
+    // Check for invalid CID formats in properly structured cookies
+    if (!hasMalformed) {
+        const allCids = getAllCookieValues('zoovu-cid');
+        hasMalformed = allCids.some(cid => !isValidCidFormat(cid));
+    }
+
+    if (hasMalformed) {
+        logDebug('[Zoovu Tracking] Found malformed CID cookies, removing them');
+        removeZoovuCidCookie();
+    }
+}
+
+function writeZoovuCidCookie(cid) {
+    const hostname = window.location.hostname;
+    const domain = getRegistrableDomain(hostname);
+    const oneYearInSeconds = 365 * 24 * 60 * 60;
+    let zoovuCid = `zoovu-cid=${cid}; path=/; domain=.${domain}; max-age=${oneYearInSeconds}`;
+    if (window.isSecureContext) {
+        zoovuCid += `; Secure`;
+    }
+    document.cookie = zoovuCid;
+}
+
+function addZoovuCidToCookies() {
+    const cid = `${generateUuid()}_${Date.now()}`;
+    writeZoovuCidCookie(cid);
+    return cid;
+}
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function getCID() {
+    removeMalformedZoovuCidCookies();
+
+    // Check if we have a valid cookie
+    const existingCid = getCookieValue(`zoovu-cid`);
+
+    if (existingCid !== null && isValidCidFormat(existingCid)) {
+        writeZoovuCidCookie(existingCid);
+        return existingCid;
+    }
+
+    // No valid cookie exists, create a new one
+    return addZoovuCidToCookies();
+}
+
+function getEnvironment() {
+    return currentEnvironment;
+}
+
+function getAccountId() {
+    return currentAccountId;
+}
+
+function getPropertyTypeError(propertyName, expectedType, currentType) {
+    return `TYPE MISMATCH: ${propertyName}: should be ${expectedType} but is ${currentType}`
+}
+
+function typeCheckValue(value, variableType, propertyName, variableId, triggerId) {
+    // Missing values are allowed here — required-field enforcement lives in ensureRequiredFieldsPresent.
+    // Optional fields may legitimately return null/undefined (e.g. category, price).
+    if (value === undefined || value === null) {
+        return;
+    }
+    let errorMessage = '';
+    switch (variableType) {
+        case "TEXT":
+            if (typeof value !== 'string')
+                errorMessage = getPropertyTypeError(propertyName, 'string', typeof value);
+            break;
+        case "INTEGER":
+        case "DECIMAL":
+            if (typeof value !== 'number')
+                errorMessage = getPropertyTypeError(propertyName, 'number', typeof value);
+            break;
+        case "BOOLEAN":
+            if (typeof value !== 'boolean')
+                errorMessage = getPropertyTypeError(propertyName, 'boolean', typeof value);
+            break;
+        case 'LIST':
+            if (!Array.isArray(value))
+                errorMessage = getPropertyTypeError(propertyName, 'list', typeof value);
+            break;
+        case 'EVENT':
+            break;
+        default:
+            throw new TrackingExecutionError(`Not supported variable type: ${variableType}`, trackingEntityTypes.VARIABLE, variableId, triggerId, script.id, trackingErrorTypes.UNSUPPORTED_VARIABLE)
+    }
+    if (errorMessage) {
+        throw new TrackingExecutionError(errorMessage, trackingEntityTypes.VARIABLE, variableId, triggerId, script.id, trackingErrorTypes.TYPE_MISMATCH)
+    }
+}
+
+function ensureRequiredFieldsPresent(fields, eventType) {
+    return Object.entries(fields).every(([key, value]) => {
+        if (!value) {
+            // eventFields is only populated on the rule-driven path; direct public-API calls
+            // (e.g. ZoovuTrackingManager.sendPurchaseEvent) reach this with eventFields empty,
+            // where the unguarded lookup used to throw a raw TypeError instead of the intended
+            // TrackingExecutionError.
+            const matchedField = eventFields.find(field => field.fieldName === key);
+            const variableId = matchedField ? matchedField.variableId : null;
+            // empty eventFields
+            eventFields = [];
+            throw new TrackingExecutionError(
+                `Required property ${key} missing value for ${eventType}.`,
+                trackingEntityTypes.VARIABLE,
+                variableId,
+                null,
+                script.id,
+                trackingErrorTypes.MISSING_VALUE
+            )
+        }
+        return true;
+    });
+}
+
+function getBaseEventBody(eventType) {
+    return {
+        origin: 'CLIENT',
+        queryParams: {},
+        organization: getOrganization(),
+        domainId: getDomainId(),
+        path: getPath(),
+        referrer: getReferrer(),
+        cid: getCID(),
+        timezone: getTimezone(),
+
+        // dynamic
+        eventType: eventType ?? '',
+        eventLabel: '',
+    };
+}
+
+function getEventExecutable(actionType) {
+    switch (actionType) {
+        case actionTypes.PAGE_VISITED:
+            return sendPageVisitedEvent;
+        case actionTypes.ADD_TO_CART:
+            return sendAddToCartEvent;
+        case actionTypes.CLICKOUT:
+            return sendClickoutEvent;
+        case actionTypes.REMOVE_FROM_CART:
+            return sendRemoveFromCartEvent;
+        case actionTypes.PDP_VISITED:
+            return sendPdpVisitedEvent;
+        case actionTypes.PURCHASED:
+            return sendPurchaseEvent;
+        case actionTypes.DECLINE_TRACKING:
+            return sendDeclineTrackingEvent;
+        case actionTypes.UPDATE_CART:
+            return sendUpdateCartEvent;
+        case actionTypes.SEARCH:
+            return sendSearchEvent;
+        case actionTypes.SEARCH_RESULT:
+            return sendSearchResultEvent;
+        case actionTypes.LEAD_GEN:
+            return sendLeadGenEvent;
+    }
+}
+
+function checkSpecificFieldValues(fieldName, value, variableId) {
+    const validator = domainRestrictedFields[fieldName];
+    if (!validator) {
+        return;
+    }
+    // Optional fields accept nullish — ensureRequiredFieldsPresent enforces presence where needed
+    // (e.g. currencyCode on PURCHASED). For non-optional fields, nullish is itself incompatible.
+    if (value == null && validator.optional) {
+        return;
+    }
+    if (!validator.isValid(value)) {
+        throw new TrackingExecutionError(
+            `Value ${value} is not compatible with ${fieldName}.`,
+            trackingEntityTypes.VARIABLE,
+            variableId,
+            null,
+            script.id,
+            trackingErrorTypes.OTHER
+        )
+    }
+}
+
+function getVariableValueById(variableId, event, fieldName, triggerId) {
+    const foundVariable = variables.find(v => v.id === variableId);
+    let variableValue = null;
+
+    if (foundVariable) {
+        if (foundVariable.type === variableTypes.CONSTANT) {
+            variableValue = cast(foundVariable.valueType, foundVariable.value);
+        } else if (foundVariable.type === variableTypes.FUNCTION && typeof foundVariable.function === 'function') {
+            try {
+                variableValue = foundVariable.function(event);
+            } catch (e) {
+                throw new TrackingExecutionError(
+                    e.message,
+                    trackingEntityTypes.VARIABLE,
+                    variableId,
+                    triggerId,
+                    script.id,
+                    trackingErrorTypes.OTHER
+                )
+            }
+        } else {
+            throw new TrackingExecutionError(
+                `${foundVariable.type} is not supported.`,
+                trackingEntityTypes.VARIABLE,
+                variableId,
+                triggerId,
+                script.id,
+                trackingErrorTypes.UNSUPPORTED_VARIABLE
+            )
+        }
+
+        typeCheckValue(variableValue, foundVariable.valueType, fieldName ? fieldName : foundVariable.name, variableId, triggerId);
+        if (domainRestrictedFields[fieldName]) {
+            checkSpecificFieldValues(fieldName, variableValue, variableId)
+        }
+        return variableValue;
+    } else {
+        throw new TrackingExecutionError(
+            `No variable with ID ${variableId}`,
+            trackingEntityTypes.VARIABLE,
+            variableId,
+            triggerId,
+            script.id,
+            trackingErrorTypes.MISSING_VARIABLE
+        )
+    }
+}
+
+function evaluateSingleTriggerRow(row, event, triggerId) {
+    const target = getVariableValueById(row.variableId, event, undefined, triggerId);
+    // Trigger variable returned no value — treat as "condition not met" rather than crashing the matcher.
+    if (target === undefined || target === null) {
+        return false;
+    }
+    const matcher = matchers[row.operator];
+    checkValue(row.valueType, row.value);
+    const value = cast(row.valueType, row.value);
+    if (matcher && typeof matcher === 'function') {
+        return matcher(target, value);
+    }
+    return false;
+}
+
+function preparePayloadFromFields(fields, event) {
+    const payload = {};
+    fields.forEach(f => {
+        payload[f.fieldName] = getVariableValueById(f.variableId, event, f.fieldName)
+    })
+    return payload;
+}
+
+function evaluateTriggerConditions(trigger, event) {
+    // OR between groups
+    return trigger.groups.some(group =>
+        // AND between rows
+        group.rows.every(row => evaluateSingleTriggerRow(row, event, trigger.id)))
+}
+
+function runAction(action, fields, event, trigger) {
+    const trackingExecutions = jsonParser(trackingFieldName)
+
+    if (action.type === actionTypes.CUSTOM && typeof action.code === 'function') {
+        // add script custom action
+        trackingExecutions.push(createTrackingSuccessfulExecutionRecord(trackingEntityTypes.CUSTOM_ACTION, action.id))
+        try {
+            action.code(event);
+        } catch (e) {
+            throw new TrackingExecutionError(
+                e.message,
+                trackingEntityTypes.CUSTOM_ACTION,
+                action.id,
+                null,
+                script.id,
+                trackingErrorTypes.OTHER
+            )
+        }
+        localStorage.setItem(trackingFieldName, JSON.stringify(trackingExecutions));
+    } else {
+        const sendEventFunction = getEventExecutable(action.type);
+        eventFields = [...fields];
+        if (sendEventFunction && typeof sendEventFunction === 'function') {
+            const payload = preparePayloadFromFields(fields, event)
+            sendEventFunction(payload);
+            addSuccessfulExecutions(trigger, fields)
+        }
+    }
+}
+
+// Store debounced functions per rule to reuse them
+const debouncedRuleActions = new Map();
+let ruleCounter = 0;
+
+function recordTrackingError(error) {
+    try {
+        const trackingExecutions = jsonParser(trackingFieldName);
+        const isKnown = error instanceof TrackingExecutionError;
+        const failedExecution = createTrackingFailedExecutionRecord(
+            isKnown ? error.trackingEntityType : null,
+            isKnown ? error.variableId : null,
+            isKnown ? error.triggerId : null,
+            isKnown ? error.scriptId : script.id,
+            isKnown ? error.trackingErrorType : trackingErrorTypes.OTHER,
+            (error && error.message) || String(error)
+        );
+        trackingExecutions.push(failedExecution);
+        localStorage.setItem(trackingFieldName, JSON.stringify(trackingExecutions));
+    } catch (recordingError) {
+        logDebug('Failed to record tracking error', recordingError);
+    }
+    logDebug(error);
+}
+
+// ------------------------- eager purchase trigger (opt-in, see enableShopifyDataLayerPurchaseTrigger) -------------------------
+let eagerPurchaseTriggerOptions = null;
+const eagerPendingRules = new Map();
+// once fired in this document, never again - SPA URL changes re-arm rules in tight loops
+const eagerFiredRules = new Set();
+
+function isPixelSandboxContext() {
+    return typeof window !== 'undefined' && window.location.pathname.startsWith('/web-pixels@');
+}
+
+function isEagerEligibleRule(rule) {
+    return eagerPurchaseTriggerOptions !== null
+        && rule.trigger.type === triggerTypes.PAGE_LOAD
+        && rule.action && rule.action.type === actionTypes.PURCHASED;
+}
+
+function isPurchasePayloadReady(payload) {
+    // [] would pass ensureRequiredFieldsPresent but is dropped silently by the backend
+    return Array.isArray(payload.products) && payload.products.length > 0 && !!payload.currencyCode;
+}
+
+function attemptEagerRule(entry) {
+    // .resolving blocks re-entrancy: payload resolution can re-trigger the dataLayer hooks
+    if (entry.done || entry.resolving) {
+        return;
+    }
+    entry.resolving = true;
+    let payload;
+    try {
+        payload = preparePayloadFromFields(entry.rule.fields, entry.event);
+    } catch (e) {
+        return; // variables not resolvable yet - keep waiting
+    } finally {
+        entry.resolving = false;
+    }
+    // !payload is unreachable for today's preparePayloadFromFields, but this function runs
+    // inside merchant dataLayer.push calls and must never throw there (test-pinned contract)
+    if (!payload || !isPurchasePayloadReady(payload)) {
+        return;
+    }
+    if (entry.done) {
+        return; // a nested pass may have fired this entry during resolution
+    }
+    entry.done = true;
+    clearTimeout(entry.timeoutId);
+    eagerPendingRules.delete(entry.rule._uniqueId);
+    eagerFiredRules.add(entry.rule._uniqueId);
+    try {
+        runAction(entry.rule.action, entry.rule.fields, entry.event, entry.rule.trigger);
+    } catch (error) {
+        recordTrackingError(error);
+    }
+}
+
+let attemptingEagerRules = false;
+
+function attemptAllEagerRules() {
+    if (attemptingEagerRules) {
+        return;
+    }
+    attemptingEagerRules = true;
+    try {
+        eagerPendingRules.forEach(entry => attemptEagerRule(entry));
+    } finally {
+        attemptingEagerRules = false;
+    }
+}
+
+function scheduleEagerRule(rule, event) {
+    if (eagerFiredRules.has(rule._uniqueId) || eagerPendingRules.has(rule._uniqueId)) {
+        return;
+    }
+    const timeoutMs = eagerPurchaseTriggerOptions.timeoutMs || rule.trigger.delayMs;
+    const entry = {rule, event, done: false, timeoutId: null};
+    // setTimeout is safe here: only pixel-sandbox documents reach this path, no merchant code runs there
+    entry.timeoutId = setTimeout(() => {
+        if (entry.done) {
+            return;
+        }
+        entry.done = true;
+        eagerPendingRules.delete(rule._uniqueId);
+        let payload = null;
+        try {
+            payload = preparePayloadFromFields(rule.fields, event);
+        } catch (e) {
+            // recorded below
+        }
+        if (payload && isPurchasePayloadReady(payload)) {
+            // covers pushes the hook could not observe
+            eagerFiredRules.add(rule._uniqueId);
+            try {
+                runAction(rule.action, rule.fields, event, rule.trigger);
+            } catch (error) {
+                recordTrackingError(error);
+            }
+        } else {
+            // never send an empty purchase - skip and make the failure visible
+            recordTrackingError(new TrackingExecutionError(
+                `Eager purchase trigger timed out after ${timeoutMs}ms without usable purchase data - skipping send.`,
+                trackingEntityTypes.TRIGGER,
+                null,
+                rule.trigger.id,
+                script.id,
+                trackingErrorTypes.MISSING_VALUE
+            ));
+        }
+    }, timeoutMs);
+    eagerPendingRules.set(rule._uniqueId, entry);
+    // The purchase data may already be present when the rule arms.
+    attemptEagerRule(entry);
+}
+
+function hookDataLayerForEagerRules() {
+    const wrapDataLayer = (arr) => {
+        if (!arr || arr.__zoovuEagerHooked) {
+            return arr;
+        }
+        const originalPush = arr.push.bind(arr);
+        arr.push = function () {
+            const result = originalPush.apply(undefined, arguments);
+            attemptAllEagerRules();
+            return result;
+        };
+        arr.__zoovuEagerHooked = true;
+        return arr;
+    };
+    let currentDataLayer = wrapDataLayer(window.dataLayer);
+    try {
+        // catch late (re)assignment of window.dataLayer
+        Object.defineProperty(window, 'dataLayer', {
+            configurable: true,
+            get() {
+                return currentDataLayer;
+            },
+            set(value) {
+                // `dataLayer = dataLayer || []` style self-assignment must be a no-op
+                if (value === currentDataLayer) {
+                    return;
+                }
+                currentDataLayer = wrapDataLayer(value);
+                attemptAllEagerRules();
+            },
+        });
+    } catch (e) {
+        logDebug('Eager purchase trigger: could not intercept dataLayer reassignment', e);
+    }
+}
+
+/**
+ * @public PUBLIC API — externally consumed (enabled per script via advanced mode).
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ *
+ * Opt-in for Shopify web-pixel sandboxes, where the rAF-based delayMs wait never
+ * completes in Blink (hidden 0x0 iframe -> no frames). Fires delayed PAGE_LOAD
+ * PURCHASED rules as soon as the payload is resolvable (checked on every
+ * dataLayer.push), with delayMs/options.timeoutMs as the upper bound, and never
+ * sends an empty-products purchase. No-op outside the sandbox context.
+ */
+function enableShopifyDataLayerPurchaseTrigger(options) {
+    if (!isPixelSandboxContext()) {
+        logDebug('Eager purchase trigger: not a pixel-sandbox context, keeping default behavior');
+        return false;
+    }
+    if (eagerPurchaseTriggerOptions !== null) {
+        return true;
+    }
+    eagerPurchaseTriggerOptions = {timeoutMs: (options && options.timeoutMs) || null};
+    hookDataLayerForEagerRules();
+    return true;
+}
+
+function evaluateSingleRule(rule, event) {
+    // Assign unique ID to rule if it doesn't have one
+    if (!rule._uniqueId) {
+        rule._uniqueId = ruleCounter++;
+    }
+
+    if (evaluateTriggerConditions(rule.trigger, event)) {
+        // Set default delay for INPUT triggers if delayMs is undefined
+        const delay = rule.trigger.type === triggerTypes.INPUT && rule.trigger.delayMs === undefined
+            ? 1500
+            : rule.trigger.delayMs;
+
+        if (delay) {
+            if (isEagerEligibleRule(rule)) {
+                scheduleEagerRule(rule, event);
+                return;
+            }
+
+            // Get or create debounced function for this rule using unique rule ID
+            const ruleKey = rule._uniqueId;
+
+            if (!debouncedRuleActions.has(ruleKey)) {
+                const useTrailing = rule.trigger.type === triggerTypes.INPUT;
+                const debounced = debounce(function (event) {
+                    try {
+                        runAction(rule.action, rule.fields, event, rule.trigger);
+                    } catch (error) {
+                        recordTrackingError(error);
+                    }
+                }, delay, useTrailing);
+                debouncedRuleActions.set(ruleKey, debounced);
+            }
+
+            debouncedRuleActions.get(ruleKey)(event);
+        } else {
+            runAction(rule.action, rule.fields, event, rule.trigger);
+        }
+    }
+}
+
+function evaluateRules(rules, event) {
+    try {
+        rules.forEach(rule => {
+            evaluateSingleRule(rule, event)
+        });
+    } catch (error) {
+        recordTrackingError(error);
+    }
+}
+
+function observeAndReactOnPageChange(callback) {
+    let oldHref;
+    if (oldHref === undefined) {
+        callback();
+        oldHref = document.location.href;
+    }
+
+    const body = document.querySelector('body');
+    const observer = new MutationObserver(() => {
+        if (oldHref !== document.location.href) {
+            oldHref = document.location.href;
+            callback();
+        }
+    });
+    observer.observe(body, {childList: true, subtree: true});
+}
+
+function executeAdvancedCode() {
+    if (typeof advancedCode === 'function') {
+        advancedCode();
+    }
+}
+
+function jsonParser(key) {
+    const rawValue = localStorage.getItem(key)
+    if (rawValue === null) {
+        return []
+    }
+    const foundValue = JSON.parse(rawValue)
+    if (!Array.isArray(foundValue)) {
+        throw Error('Invalid value in localStorage for key ' + key)
+    }
+    return foundValue
+}
+
+function createTrackingSuccessfulExecutionRecord(entityType, entityId) {
+    const executionTime = Date.now();
+
+    return {
+        organization: getOrganization(),
+        domainId: getDomainId(),
+        eventType: trackingEventTypes.TRACKING_SUCCESSFUL_EXECUTION,
+        trackingEntityType: entityType,
+        trackingEntityId: entityId,
+        executionTime
+    }
+}
+
+function createTrackingFailedExecutionRecord(entityType, entityId, triggerId, scriptId, errorType, message) {
+    const executionTime = Date.now();
+
+    return {
+        organization: getOrganization(),
+        domainId: getDomainId(),
+        eventType: trackingEventTypes.TRACKING_EXECUTION_FAILURE,
+        trackingEntityType: entityType,
+        trackingEntityId: entityId,
+        executionTime,
+        triggerId: triggerId || null,
+        scriptId: scriptId || null,
+        error: {
+            type: errorType,
+            message
+        }
+    }
+}
+
+function addSuccessfulExecutions(trigger, fields) {
+    const successfulExecutions = jsonParser(trackingFieldName)
+
+    // add script trigger
+    successfulExecutions.push(createTrackingSuccessfulExecutionRecord(trackingEntityTypes.TRIGGER, trigger.id))
+
+    // add script function variables
+    fields.forEach(field => {
+        const foundVariableInField = variables.find(variable => variable.id === field.variableId)
+        if (foundVariableInField.type === variableTypes.FUNCTION && foundVariableInField.scope === trackingVariableScopes.LOCAL) {
+            successfulExecutions.push(createTrackingSuccessfulExecutionRecord(trackingEntityTypes.VARIABLE, foundVariableInField.id))
+        }
+    })
+
+    // add trigger function variables
+    trigger.groups.forEach(groups => {
+        groups.rows.forEach(row => {
+            const foundVariable = variables.find(variable => variable.id === row.variableId)
+            if (foundVariable.type === variableTypes.FUNCTION && foundVariable.scope === trackingVariableScopes.LOCAL) {
+                successfulExecutions.push(createTrackingSuccessfulExecutionRecord(trackingEntityTypes.VARIABLE, foundVariable.id))
+            }
+        })
+    })
+
+    localStorage.setItem(trackingFieldName, JSON.stringify(successfulExecutions));
+}
+
+// ------------------------- events -------------------------
+async function sendEventImmediately(body) {
+    if (trackingEnabled) {
+        await fetch(`${url}/fact`, {
+            method: 'POST',
+            mode: 'cors',
+            cache: 'no-cache',
+            credentials: 'same-origin',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer',
+            keepalive: true,
+            body: JSON.stringify(body),
+        });
+    } else {
+        logDebug("Tracking disabled - no permission to track");
+    }
+}
+
+function getSignalReadyPromise() {
+    // Return existing promise if already polling
+    if (signalReadyPromise) {
+        return signalReadyPromise;
+    }
+
+    // Signal already ready, return resolved promise
+    if (signalReady) {
+        return Promise.resolve();
+    }
+
+    // Create new polling promise
+    signalReadyPromise = new Promise((resolve) => {
+        signalCheckAttempts = 0;
+
+        const checkInterval = setInterval(() => {
+            signalCheckAttempts++;
+
+            if (signalReady) {
+                clearInterval(checkInterval);
+                signalReadyPromise = null;
+                resolve();
+            } else if (signalCheckAttempts >= MAX_SIGNAL_CHECK_ATTEMPTS) {
+                clearInterval(checkInterval);
+                signalReadyPromise = null;
+                logDebug('Signal connection timeout - proceeding without signal');
+                resolve();
+            }
+        }, SIGNAL_CHECK_INTERVAL_MS);
+    });
+
+    return signalReadyPromise;
+}
+
+async function sendEvent(body) {
+    if (trackingEnabled) {
+        // Check if we should wait for signal connection
+        // Only wait if launcher exists (hasLauncher) and signal is not ready yet
+        if (hasLauncher && !signalReady && signalCheckAttempts < MAX_SIGNAL_CHECK_ATTEMPTS) {
+            // Queue the event - don't block, just queue it
+            eventQueue.push(body);
+
+            // Trigger polling in background (fire and forget)
+            getSignalReadyPromise().then(() => {
+                // Flush happens in setSignalReady, but handle timeout case
+                if (!signalReady && eventQueue.length > 0) {
+                    const eventsToFlush = [...eventQueue];
+                    eventQueue = [];
+                    eventsToFlush.forEach(queuedEvent => {
+                        sendEventImmediately(queuedEvent);
+                    });
+                }
+            });
+        } else {
+            // Send immediately if no launcher or signal already ready
+            await sendEventImmediately(body);
+        }
+    } else {
+        logDebug("Tracking disabled - no permission to track");
+    }
+}
+
+async function sendSSTRPurchaseEvent(body) {
+    if (trackingEnabled) {
+        const purchaseUrl = 'https://ev-co.zoovu.com/v1/CollectSalesEvent';
+        const response = await fetch(purchaseUrl, {
+            method: 'POST',
+            mode: 'cors',
+            cache: 'no-cache',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer',
+            keepalive: true,
+            body: JSON.stringify(body),
+        });
+        if (!response.ok) {
+            // fetch resolves on HTTP errors - reject so the caller can forget the dedup key
+            throw new Error(`CollectSalesEvent failed: ${response.status}`);
+        }
+    } else {
+        logDebug("Tracking disabled - no permission to track");
+    }
+}
+
+async function sendTrackingSuccessfulExecution(body) {
+    if (trackingEnabled) {
+        await fetch(`${url}/tracking/executions`, {
+            method: 'POST',
+            mode: 'cors',
+            cache: 'no-cache',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            redirect: 'follow',
+            referrerPolicy: 'no-referrer',
+            keepalive: true,
+            body: JSON.stringify(body),
+        });
+    } else {
+        logDebug("Tracking disabled - no permission to track");
+    }
+}
+
+function sendFactEventBase(eventType, eventSpecificBody) {
+    if (Number.isNaN(eventSpecificBody.price)) {
+        throw new Error(`Invalid price for ${eventType} event: price resolved to NaN.`);
+    }
+    const body = {
+        ...getBaseEventBody(eventType),
+        // event label + custom per-event fields
+        ...eventSpecificBody,
+    };
+    sendEvent(body);
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendPageVisitedEvent({locale, category, eventLabel = 'Page visit'}) {
+    const body = {
+        locale,
+        eventLabel,
+        // optional
+        category,
+    };
+
+    if (ensureRequiredFieldsPresent({locale}, eventTypes.PAGE_VISITED)) {
+        sendFactEventBase(eventTypes.PAGE_VISITED, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendPdpVisitedEvent({
+                                 locale,
+                                 sku,
+                                 quantity = 1,
+                                 currencyCode,
+                                 eventLabel = "Product details page visit",
+                                 price,
+                                 category
+                             }) {
+    const body = {
+        locale,
+        sku,
+        eventLabel,
+        // optional
+        category,
+        price,
+        currencyCode,
+        quantity,
+    };
+    if (ensureRequiredFieldsPresent({locale, sku}, eventTypes.PDP_VISITED)) {
+        sendFactEventBase(eventTypes.PDP_VISITED, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendAddToCartEvent({
+                                locale,
+                                sku,
+                                quantity = 1,
+                                currencyCode,
+                                eventLabel = "Add to cart",
+                                price,
+                                category
+                            }) {
+    const body = {
+        locale,
+        sku,
+        eventLabel,
+        // optional
+        category,
+        price,
+        currencyCode,
+        quantity,
+    };
+    if (ensureRequiredFieldsPresent({locale, sku}, eventTypes.ADD_TO_CART)) {
+        sendFactEventBase(eventTypes.ADD_TO_CART, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendRemoveFromCartEvent({
+                                     locale,
+                                     sku,
+                                     quantity = 1,
+                                     currencyCode,
+                                     eventLabel = "Remove from cart",
+                                     price,
+                                     category
+                                 }) {
+    const body = {
+        locale,
+        sku,
+        eventLabel,
+        // optional
+        category,
+        price,
+        currencyCode,
+        quantity,
+    };
+    if (ensureRequiredFieldsPresent({locale, sku}, eventTypes.REMOVE_FROM_CART)) {
+        sendFactEventBase(eventTypes.REMOVE_FROM_CART, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendUpdateCartEvent({
+                                 locale,
+                                 sku,
+                                 quantity = 1,
+                                 currencyCode,
+                                 eventLabel = "Update cart",
+                                 price,
+                                 category
+                             }) {
+    const body = {
+        locale,
+        sku,
+        eventLabel,
+        // optional
+        category,
+        price,
+        currencyCode,
+        quantity,
+    };
+
+    if (ensureRequiredFieldsPresent({locale, sku}, eventTypes.UPDATE_CART)) {
+        sendFactEventBase(eventTypes.UPDATE_CART, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendDeclineTrackingEvent({
+                                      locale,
+                                      eventLabel = "No permission to track",
+                                      category
+                                  }) {
+    const body = {
+        locale,
+        eventLabel,
+        // optional
+        category
+    };
+    if (ensureRequiredFieldsPresent({locale}, eventTypes.DECLINE_TRACKING)) {
+        sendFactEventBase(eventTypes.DECLINE_TRACKING, body);
+        disableTracking();
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendSearchEvent({
+                             locale,
+                             eventLabel = "Search phrase typed",
+                             category
+                         }) {
+    const body = {
+        locale,
+        eventLabel,
+        // optional
+        category,
+    };
+    if (ensureRequiredFieldsPresent({locale}, eventTypes.SEARCH)) {
+        sendFactEventBase(eventTypes.SEARCH, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendSearchResultEvent({
+                                   locale,
+                                   isEmpty = false,
+                                   eventLabel = "Search results",
+                                   skus,
+                                   category
+                               }) {
+    const body = {
+        locale,
+        isEmpty,
+        skus,
+        eventLabel,
+        // optional
+        category
+    };
+    if (ensureRequiredFieldsPresent({locale, skus}, eventTypes.SEARCH_RESULT)) {
+
+        sendFactEventBase(eventTypes.SEARCH_RESULT, body);
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendClickoutEvent({
+                               locale,
+                               targetUrl,
+                               namedReferral,
+                               eventLabel = "Clickout",
+                               category
+                           }) {
+    const body = {
+        locale,
+        targetUrl,
+        namedReferral,
+        eventLabel,
+        // optional
+        category
+    };
+    if (ensureRequiredFieldsPresent({locale, targetUrl, namedReferral}, eventTypes.CLICKOUT)) {
+        sendFactEventBase(eventTypes.CLICKOUT, body);
+    }
+};
+
+// ------------------------- purchase dedup guard (tab-scoped) -------------------------
+// Suppresses same-tab re-sends of an identical purchase; fails open on storage errors.
+const PURCHASE_DEDUP_WINDOW_MS = 60 * 60 * 1000;
+// short window for id-less purchases: their identity is only inferred
+const PURCHASE_DEDUP_NOID_WINDOW_MS = 10 * 60 * 1000;
+const PURCHASE_DEDUP_MAX_KEYS = 20;
+const purchaseDedupStorageKey = `${domainId}_zvSentPurchases`;
+let purchaseDedupGuardEnabled = true;
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Escape hatch for integrations that intentionally re-send purchase events.
+ */
+function disablePurchaseDedupGuard() {
+    purchaseDedupGuardEnabled = false;
+}
+
+function purchaseDedupHash(str) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) {
+        h = ((h << 5) + h + str.charCodeAt(i)) >>> 0;
+    }
+    return h.toString(36);
+}
+
+// returns null when the purchase carries no provable identity - the guard is skipped
+function buildPurchaseDedupKey(transactionId, products, currencyCode) {
+    const items = (products || [])
+        .filter(Boolean)
+        .map(p => {
+            const raw = getPurchaseProductPrice(p);
+            const num = Number(raw);
+            // unparseable prices stay verbatim - collapsing them all to one value would merge different carts
+            const price = isFinite(num) ? num.toFixed(2) : String(raw);
+            return `${p.sku}:${Number(p.quantity) || 0}:${price}`;
+        })
+        .sort() // cart order must not change the key
+        .join(',');
+    if (transactionId) {
+        return `tid|${transactionId}|${purchaseDedupHash(`${currencyCode || ''}|${items}`)}`;
+    }
+    if (isPixelSandboxContext()) {
+        // the sandbox pathname is per-shop, not per-order - identity is not provable there
+        return null;
+    }
+    // no transaction id: the confirmation-page pathname is the order-identity proxy
+    const pathname = (typeof window !== 'undefined' && window.location) ? window.location.pathname : '';
+    return `noid|${purchaseDedupHash(`${pathname}|${currencyCode || ''}|${items}`)}`;
+}
+
+function readSentPurchaseMap() {
+    let map = null;
+    try {
+        map = JSON.parse(sessionStorage.getItem(purchaseDedupStorageKey));
+    } catch (e) {
+        // corrupted value - replaced on next write
+    }
+    return (map && typeof map === 'object') ? map : {};
+}
+
+function isDuplicatePurchase(dedupKey) {
+    if (!purchaseDedupGuardEnabled) {
+        return false;
+    }
+    try {
+        const map = readSentPurchaseMap();
+        const sentAt = map[dedupKey];
+        const windowMs = dedupKey.startsWith('noid|')
+            ? PURCHASE_DEDUP_NOID_WINDOW_MS
+            : PURCHASE_DEDUP_WINDOW_MS;
+        return typeof sentAt === 'number' && (Date.now() - sentAt) < windowMs;
+    } catch (e) {
+        return false; // fail open
+    }
+}
+
+function rememberSentPurchase(dedupKey) {
+    try {
+        const map = readSentPurchaseMap();
+        map[dedupKey] = Date.now();
+        const keys = Object.keys(map);
+        if (keys.length > PURCHASE_DEDUP_MAX_KEYS) {
+            keys.sort((a, b) => map[a] - map[b]);
+            for (let i = 0; i < keys.length - PURCHASE_DEDUP_MAX_KEYS; i++) {
+                delete map[keys[i]];
+            }
+        }
+        sessionStorage.setItem(purchaseDedupStorageKey, JSON.stringify(map));
+    } catch (e) {
+        // fail open
+    }
+}
+
+function forgetSentPurchase(dedupKey) {
+    try {
+        const map = readSentPurchaseMap();
+        delete map[dedupKey];
+        sessionStorage.setItem(purchaseDedupStorageKey, JSON.stringify(map));
+    } catch (e) {
+        // fails closed: the key stays remembered and suppression persists for the window
+    }
+}
+
+// ------------------------- purchase payload validation -------------------------
+// Caught here or nowhere: SSTR 200s any product shape. An empty list blocks the send (worth
+// nothing); a missing price only forfeits that line (SSTR reads it as 0) so it reports and sends.
+function getPurchaseProductPrice(product) {
+    if (!product) {
+        return undefined;
+    }
+    return product.price != null ? product.price : product.pricePerUnit;
+}
+
+function purchaseProductsError(message) {
+    const productsField = eventFields.find(field => field.fieldName === 'products');
+    return new TrackingExecutionError(
+        message,
+        trackingEntityTypes.VARIABLE,
+        productsField ? productsField.variableId : null,
+        null,
+        script.id,
+        trackingErrorTypes.MISSING_VALUE
+    );
+}
+
+function ensurePurchaseProductsValid(products) {
+    if (!Array.isArray(products) || products.length === 0) {
+        const error = purchaseProductsError(`Invalid products for ${eventTypes.PURCHASED}: products must be a non-empty array.`);
+        eventFields = []; // as ensureRequiredFieldsPresent
+        throw error;
+    }
+    const unpriced = [];
+    for (let i = 0; i < products.length; i++) {
+        const price = getPurchaseProductPrice(products[i]);
+        if (price === null || price === undefined || price === '') {
+            unpriced.push(`products[${i}] (sku: ${(products[i] && products[i].sku) || 'unknown'})`);
+        }
+    }
+    if (unpriced.length > 0) {
+        recordTrackingError(purchaseProductsError(
+            `Missing price for ${eventTypes.PURCHASED}, counted as 0: ${unpriced.join(', ')} - set price or pricePerUnit.`
+        ));
+    }
+    return true;
+}
+
+const KEPT_SEGMENTS = ['checkouts', 'checkout', 'orders', 'order-received', 'cart',
+    'thank_you', 'thank-you', 'information', 'payment', 'shipping', 'success',
+    'products', 'collections', 'account', 'search', 'sandbox', 'modern', 'custom'];
+
+function redactPathSegment(segment) {
+    if (segment.indexOf('web-pixels') === 0) {
+        return 'web-pixels';
+    }
+    if (segment === '' || KEPT_SEGMENTS.indexOf(segment) !== -1 || /^[a-z]{2}-[a-z]{2}$/.test(segment)) {
+        return segment;
+    }
+    return '_';
+}
+
+function redactPathname(pathname) {
+    const segments = pathname.split('/');
+    for (let i = 0; i < segments.length; i++) {
+        segments[i] = redactPathSegment(segments[i]);
+    }
+    return segments.join('/');
+}
+
+function getRedactedDocumentLocation() {
+    if (typeof window === 'undefined' || !window.location) {
+        return null;
+    }
+    return window.location.origin + redactPathname(window.location.pathname);
+}
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendPurchaseEvent({
+                               currencyCode,
+                               transactionId,
+                               products
+                           }) {
+    const sstrBody = {
+        transactionId,
+        products,
+        currency: currencyCode,
+        browserTimestamp: Date.now(),
+        env: getEnvironment(),
+        accountId: getAccountId(),
+        clientId: getCID(),
+        documentLocation: getRedactedDocumentLocation(),
+    };
+    if (ensureRequiredFieldsPresent({products, currencyCode,}, eventTypes.PURCHASED)
+        && ensurePurchaseProductsValid(products)) {
+        const dedupKey = buildPurchaseDedupKey(transactionId, products, currencyCode);
+        if (dedupKey && isDuplicatePurchase(dedupKey)) {
+            logDebug(`Duplicate purchase suppressed (same tab): ${dedupKey}`);
+            return;
+        }
+        if (dedupKey && trackingEnabled) {
+            // remembered before the fetch (the duplicate can fire before the response), and
+            // only when a send can actually happen - a purchase swallowed by disabled
+            // tracking must stay re-sendable after consent
+            rememberSentPurchase(dedupKey);
+        }
+        // a failed send must not block the refresh-retry
+        sendSSTRPurchaseEvent(sstrBody).catch(() => {
+            if (dedupKey) {
+                forgetSentPurchase(dedupKey);
+            }
+        });
+    }
+};
+
+/**
+ * @public PUBLIC API — externally consumed.
+ * Renaming, changing the signature, or changing the return shape
+ * will break callers. Do not modify without a deprecation plan.
+ */
+function sendLeadGenEvent({
+                              locale,
+                              currencyCode,
+                              products,
+                              leadId,
+                              leadType,
+                              category,
+                              eventLabel = "Lead gen sent"
+                          }) {
+    const body = {
+        locale,
+        eventLabel,
+        // optional
+        currencyCode,
+        products,
+        leadId,
+        leadType,
+        category
+    };
+    if (ensureRequiredFieldsPresent({locale}, eventTypes.LEAD_GEN)) {
+
+        sendFactEventBase(eventTypes.LEAD_GEN, body);
+    }
+};
+
+function sendSuccessfulExecutionEvent(forceSend) {
+    const successfulExecutions = jsonParser(trackingFieldName)
+
+    if (successfulExecutions.length === MAX_RECORDS || (forceSend && successfulExecutions.length > 0)) {
+        sendTrackingSuccessfulExecution(successfulExecutions)
+        localStorage.setItem(trackingFieldName, JSON.stringify([]))
+    }
+}
+
+function exposeTrackingApi() {
+    if (typeof window !== 'undefined') {
+        if (typeof window.ZoovuTrackingManager === 'undefined') {
+            window.ZoovuTrackingManager = {};
+        }
+
+        // Public API with stable contract - these signatures won't change
+        const sendPageVisitedEventPublic = (event) => sendPageVisitedEvent(event);
+        const sendPdpVisitedEventPublic = (event) => sendPdpVisitedEvent(event);
+        const sendAddToCartEventPublic = (event) => sendAddToCartEvent(event);
+        const sendRemoveFromCartEventPublic = (event) => sendRemoveFromCartEvent(event);
+        const sendUpdateCartEventPublic = (event) => sendUpdateCartEvent(event);
+        const sendDeclineTrackingEventPublic = (event) => sendDeclineTrackingEvent(event);
+        const sendSearchEventPublic = (event) => sendSearchEvent(event);
+        const sendSearchResultEventPublic = (event) => sendSearchResultEvent(event);
+        const sendClickoutEventPublic = (event) => sendClickoutEvent(event);
+        const sendPurchaseEventPublic = (event) => sendPurchaseEvent(event);
+        const sendLeadGenEventPublic = (event) => sendLeadGenEvent(event);
+
+        window.ZoovuTrackingManager = {
+            // Public API - stable contract
+            sendPageVisitedEvent: sendPageVisitedEventPublic,
+            sendPdpVisitedEvent: sendPdpVisitedEventPublic,
+            sendAddToCartEvent: sendAddToCartEventPublic,
+            sendRemoveFromCartEvent: sendRemoveFromCartEventPublic,
+            sendUpdateCartEvent: sendUpdateCartEventPublic,
+            sendDeclineTrackingEvent: sendDeclineTrackingEventPublic,
+            sendSearchEvent: sendSearchEventPublic,
+            sendSearchResultEvent: sendSearchResultEventPublic,
+            sendClickoutEvent: sendClickoutEventPublic,
+            sendPurchaseEvent: sendPurchaseEventPublic,
+            sendLeadGenEvent: sendLeadGenEventPublic,
+
+            // Utility methods
+            disableTracking,
+            enableTracking,
+            getNumericPriceFromString,
+            enableShopifyDataLayerPurchaseTrigger,
+            disablePurchaseDedupGuard,
+
+            setSignalReady,
+        };
+    }
+}
+
+// ------------------------- core -------------------------
+function reactOnLoad() {
+    const pageLoadRules = script.rows.filter(row => row.trigger.type === triggerTypes.PAGE_LOAD);
+    
+    const handler = (event) => {
+        observeAndReactOnPageChange(() => {
+            evaluateRules(pageLoadRules, event);
+            sendSuccessfulExecutionEvent();
+        });
+    };
+    
+    // Check if page already loaded
+    if (document.readyState === "complete") {
+        handler(new Event('load'));
+    } else {
+        window.addEventListener("load", handler, {capture: true});
+    }
+}
+
+function reactOnClick() {
+    const clickRules = script.rows.filter(row => row.trigger.type === triggerTypes.CLICK);
+
+    // click via mouse
+    document.querySelector('body').addEventListener('mousedown', (event) => {
+        evaluateRules(clickRules, event);
+        sendSuccessfulExecutionEvent()
+    }, {capture: true});
+
+    // click via enter button
+    document.querySelector('body').addEventListener('keydown', (event) => {
+        if (event.code === "Enter" || event.code === "NumpadEnter") {
+            evaluateRules(clickRules, event);
+            sendSuccessfulExecutionEvent()
+        }
+    }, {capture: true});
+}
+
+function reactOnInput() {
+    const inputRules = script.rows.filter(row => row.trigger.type === triggerTypes.INPUT);
+
+    document.querySelector('body').addEventListener('input', function (event) {
+        evaluateRules(inputRules, event);
+        sendSuccessfulExecutionEvent()
+    }, {capture: true});
+}
+
+function reactOnMouseLeave() {
+    document.addEventListener("mouseleave", function (event) {
+        if (event.clientY <= 0 || event.clientX <= 0 || (event.clientX >= window.innerWidth || event.clientY >= window.innerHeight)) {
+            sendSuccessfulExecutionEvent(true)
+        }
+    });
+}
+
+// Expose API immediately - doesn't require DOM or event listeners
+exposeTrackingApi();
+
+function track() {
+    try {
+        executeAdvancedCode();
+        reactOnLoad();
+        reactOnClick();
+        reactOnInput();
+        reactOnMouseLeave();
+    } catch (error) {
+        logDebug("Tracking disabled", error);
+    }
+}
+
+// RUN SCRIPT AFTER PAGE LOAD
+if (document.readyState === "loading" || document.readyState === "interactive") {
+    // Loading hasn't finished yet
+    document.addEventListener("readystatechange", (event) => {
+        if (event.target.readyState === "complete") {
+            track();
+        }
+    });
+} else {
+    track();
+}
+})();
